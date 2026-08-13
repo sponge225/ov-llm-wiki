@@ -1632,6 +1632,15 @@ class AgentLoop:
             response_metadata = dict(msg.metadata or {})
             if relevant_memories is not None:
                 response_metadata["relevant_memories"] = relevant_memories
+            trace_messages = list(messages)
+            trace_assistant_message: dict[str, Any] = {
+                "role": "assistant",
+                "content": ensure_non_empty_assistant_content(final_content),
+            }
+            if final_reasoning_content:
+                trace_assistant_message["reasoning_content"] = final_reasoning_content
+            trace_messages.append(trace_assistant_message)
+            response_metadata["trace_messages"] = trace_messages
             await self.bus.publish_outbound(
                 OutboundMessage(
                     session_key=msg.session_key,

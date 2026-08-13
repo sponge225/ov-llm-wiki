@@ -6,6 +6,7 @@ File System Service for OpenViking.
 Provides file system operations: ls, mkdir, rm, mv, tree, stat, read, abstract, overview, grep, glob.
 """
 
+import json
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from openviking.core.namespace import context_type_for_uri
@@ -30,6 +31,166 @@ from openviking_cli.exceptions import DeadlineExceededError, NotInitializedError
 from openviking_cli.utils import VikingURI, get_logger
 
 logger = get_logger(__name__)
+
+_WIKI_NODES_URI = "viking://wiki/nodes"
+_WIKI_NODES_JSON_URI = "viking://wiki/nodes.json"
+
+
+def _normalize_uri(uri: str | None) -> str:
+    normalized = (uri or "").strip()
+    if normalized == "viking://":
+        return normalized
+    return normalized.rstrip("/")
+
+
+def _is_wiki_node_grep_uri(uri: str | None) -> bool:
+    normalized = _normalize_uri(uri)
+    if _is_wiki_document_uri(normalized):
+        return True
+    if normalized == _WIKI_NODES_URI:
+        return True
+    prefix = f"{_WIKI_NODES_URI}/"
+    if not normalized.startswith(prefix):
+        return False
+    remainder = normalized[len(prefix) :]
+    return bool(remainder) and "/" not in remainder
+
+
+def _is_wiki_node_ls_uri(uri: str | None) -> bool:
+    normalized = _normalize_uri(uri)
+    if normalized == _WIKI_NODES_URI:
+        return True
+    prefix = f"{_WIKI_NODES_URI}/"
+    if not normalized.startswith(prefix):
+        return False
+    remainder = normalized[len(prefix) :]
+    return bool(remainder) and "/" not in remainder
+
+
+def _is_wiki_document_uri(uri: str | None) -> bool:
+    normalized = _normalize_uri(uri)
+    return normalized.startswith(f"{_WIKI_NODES_URI}/") and "/documents" in normalized
+
+
+def _wiki_node_id_from_uri(uri: str) -> str | None:
+    normalized = _normalize_uri(uri)
+    if normalized == _WIKI_NODES_URI:
+        return None
+    prefix = f"{_WIKI_NODES_URI}/"
+    if not normalized.startswith(prefix):
+        return None
+    remainder = normalized[len(prefix) :]
+    node_id = remainder.split("/", 1)[0]
+    return node_id or None
+
+
+def _wiki_subtree_node_ids(
+    nodes: list[dict[str, Any]],
+    target_node_id: str | None,
+) -> list[str]:
+    node_ids = [str(node.get("node_id")) for node in nodes if node.get("node_id")]
+    if target_node_id is None:
+        return node_ids
+
+    children_by_parent: dict[str, list[str]] = {}
+    for node in nodes:
+        node_id = node.get("node_id")
+        if not node_id:
+            continue
+        parent_node_id = node.get("parent_node_id")
+        if parent_node_id:
+            children_by_parent.setdefault(str(parent_node_id), []).append(str(node_id))
+        for child_node_id in node.get("child_node_ids") or []:
+            children_by_parent.setdefault(str(node_id), []).append(str(child_node_id))
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+    stack = [target_node_id]
+    while stack:
+        node_id = stack.pop(0)
+        if node_id in seen:
+            continue
+        seen.add(node_id)
+        ordered.append(node_id)
+        stack.extend(children_by_parent.get(node_id, []))
+    return ordered
+
+
+def _wiki_direct_child_node_ids(
+    nodes: list[dict[str, Any]],
+    target_node_id: str | None,
+) -> list[str]:
+    if target_node_id is None:
+        return [
+            str(node.get("node_id"))
+            for node in nodes
+            if node.get("node_id") and not node.get("parent_node_id")
+        ]
+
+    direct: list[str] = []
+    seen: set[str] = set()
+    for node in nodes:
+        if str(node.get("node_id") or "") != target_node_id:
+            continue
+        for child_node_id in node.get("child_node_ids") or []:
+            child_id = str(child_node_id)
+            if child_id and child_id not in seen:
+                direct.append(child_id)
+                seen.add(child_id)
+        break
+
+    for node in nodes:
+        node_id = node.get("node_id")
+        if not node_id or str(node.get("parent_node_id") or "") != target_node_id:
+            continue
+        node_id = str(node_id)
+        if node_id not in seen:
+            direct.append(node_id)
+            seen.add(node_id)
+    return direct
+
+
+def _wiki_node_entry(node_id: str, node: dict[str, Any] | None, output: str) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "name": node_id,
+        "uri": f"{_WIKI_NODES_URI}/{node_id}",
+        "isDir": True,
+        "size": 0,
+    }
+    title = node.get("title") if node else None
+    if title:
+        entry["title"] = str(title)
+        if output == "agent":
+            entry["abstract"] = str(title)
+    elif output == "agent":
+        entry["abstract"] = ""
+    return entry
+
+
+def _wiki_documents_entry(node_id: str, output: str) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "name": "documents",
+        "uri": f"{_WIKI_NODES_URI}/{node_id}/documents",
+        "isDir": True,
+        "size": 0,
+    }
+    if output == "agent":
+        entry["abstract"] = "Wiki node knowledge documents"
+    return entry
+
+
+def _filter_wiki_document_matches(matches: list[Any]) -> list[Any]:
+    filtered = []
+    for match in matches:
+        match_uri = match.get("uri", "") if isinstance(match, dict) else getattr(match, "uri", "")
+        normalized_match_uri = _normalize_uri(str(match_uri or ""))
+        if (
+            normalized_match_uri.startswith(f"{_WIKI_NODES_URI}/")
+            and "/documents/" in normalized_match_uri
+            and normalized_match_uri.endswith(".md")
+        ):
+            filtered.append(match)
+    return filtered
 
 if TYPE_CHECKING:
     from openviking.resource.watch_manager import WatchManager
@@ -111,6 +272,20 @@ class FSService:
         viking_fs = self._ensure_initialized()
         uri = validate_viking_uri(uri)
 
+        if not recursive and _is_wiki_node_ls_uri(uri):
+            entries = await self._wiki_node_ls_entries(
+                viking_fs,
+                uri,
+                ctx,
+                output=output,
+                node_limit=node_limit,
+                sort_by=sort_by,
+                sort_order=sort_order,
+            )
+            if simple:
+                return [entry.get("uri", "") for entry in entries]
+            return entries
+
         if simple:
             # Only return URIs — skip expensive abstract fetching to save tokens
             if recursive:
@@ -155,6 +330,49 @@ class FSService:
                 sort_by=sort_by,
                 sort_order=sort_order,
             )
+        return entries
+
+    async def _wiki_node_ls_entries(
+        self,
+        viking_fs: VikingFS,
+        uri: str,
+        ctx: RequestContext,
+        *,
+        output: str,
+        node_limit: int,
+        sort_by: Optional[str],
+        sort_order: str,
+    ) -> list[dict[str, Any]]:
+        if output not in {"original", "agent"}:
+            raise ValueError(f"Invalid output format: {output}")
+        if sort_order not in {"asc", "desc"}:
+            raise ValueError("sort_order must be 'asc' or 'desc'")
+
+        normalized = _normalize_uri(uri)
+        nodes = await self._read_wiki_nodes(viking_fs, ctx)
+        nodes_by_id = {str(node.get("node_id")): node for node in nodes if node.get("node_id")}
+        target_node_id = _wiki_node_id_from_uri(normalized)
+        child_node_ids = _wiki_direct_child_node_ids(nodes, target_node_id)
+
+        entries: list[dict[str, Any]] = []
+        if target_node_id:
+            entries.append(_wiki_documents_entry(target_node_id, output))
+        entries.extend(
+            _wiki_node_entry(node_id, nodes_by_id.get(node_id), output)
+            for node_id in child_node_ids
+            if node_id in nodes_by_id
+        )
+
+        if sort_by == "name":
+            entries.sort(
+                key=lambda entry: (str(entry.get("name", "")).lower(), str(entry.get("name", ""))),
+                reverse=sort_order == "desc",
+            )
+        elif sort_by not in {None, "mtime"}:
+            raise ValueError("sort_by must be 'name' or 'mtime'")
+
+        if node_limit is not None and node_limit > 0:
+            return entries[:node_limit]
         return entries
 
     async def mkdir(
@@ -519,6 +737,18 @@ class FSService:
         viking_fs = self._ensure_initialized()
         uri = validate_viking_uri(uri)
         exclude_uri = validate_optional_viking_uri(exclude_uri, field_name="exclude_uri") or None
+        if _is_wiki_node_grep_uri(uri):
+            target_uris = await self._wiki_grep_document_targets(viking_fs, uri, ctx)
+            return await self._grep_multiple_targets(
+                viking_fs,
+                target_uris,
+                pattern,
+                ctx=ctx,
+                exclude_uri=exclude_uri,
+                case_insensitive=case_insensitive,
+                node_limit=node_limit,
+                level_limit=level_limit,
+            )
         return await viking_fs.grep(
             uri,
             pattern,
@@ -528,6 +758,73 @@ class FSService:
             level_limit=level_limit,
             ctx=ctx,
         )
+
+    async def _wiki_grep_document_targets(
+        self,
+        viking_fs: VikingFS,
+        uri: str,
+        ctx: RequestContext,
+    ) -> list[str]:
+        normalized = _normalize_uri(uri)
+        if _is_wiki_document_uri(normalized):
+            return [uri]
+
+        nodes = await self._read_wiki_nodes(viking_fs, ctx)
+        target_node_id = _wiki_node_id_from_uri(normalized)
+        node_ids = _wiki_subtree_node_ids(nodes, target_node_id)
+        if not node_ids and target_node_id:
+            node_ids = [target_node_id]
+
+        return [f"{_WIKI_NODES_URI}/{node_id}/documents/" for node_id in node_ids]
+
+    async def _read_wiki_nodes(self, viking_fs: VikingFS, ctx: RequestContext) -> list[dict[str, Any]]:
+        content = await viking_fs.read_file(_WIKI_NODES_JSON_URI, ctx=ctx)
+        payload = json.loads(content)
+        nodes = payload.get("nodes") if isinstance(payload, dict) else payload
+        return [node for node in nodes or [] if isinstance(node, dict)]
+
+    async def _grep_multiple_targets(
+        self,
+        viking_fs: VikingFS,
+        target_uris: list[str],
+        pattern: str,
+        *,
+        ctx: RequestContext,
+        exclude_uri: Optional[str],
+        case_insensitive: bool,
+        node_limit: Optional[int],
+        level_limit: int,
+    ) -> Dict:
+        matches: list[Any] = []
+        files_scanned = 0
+        for target_uri in target_uris:
+            remaining_limit = None
+            if node_limit is not None and node_limit > 0:
+                remaining_limit = node_limit - len(matches)
+                if remaining_limit <= 0:
+                    break
+
+            result = await viking_fs.grep(
+                target_uri,
+                pattern,
+                exclude_uri=exclude_uri,
+                case_insensitive=case_insensitive,
+                node_limit=remaining_limit,
+                level_limit=level_limit,
+                ctx=ctx,
+            )
+            target_matches = result.get("matches", []) if isinstance(result, dict) else []
+            matches.extend(_filter_wiki_document_matches(target_matches))
+            files_scanned += result.get("files_scanned", 0) if isinstance(result, dict) else 0
+
+        if node_limit is not None and node_limit > 0:
+            matches = matches[:node_limit]
+        return {
+            "matches": matches,
+            "count": len(matches),
+            "match_count": len(matches),
+            "files_scanned": files_scanned,
+        }
 
     async def glob(
         self,

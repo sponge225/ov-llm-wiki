@@ -426,7 +426,10 @@ class VikingSearchTool(OVFileTool):
                 and (memory_owner_user_ids or legacy_memory_user_ids)
             ):
                 user_ids = memory_owner_user_ids or legacy_memory_user_ids
-                search_targets: list[tuple[str, str | None]] = [("viking://resources/", None)]
+                search_targets: list[tuple[str, str | None]] = [
+                    ("viking://resources/", None),
+                    ("viking://wiki/nodes", None),
+                ]
                 for user_id in self._dedupe_strings(list(user_ids or [])):
                     memory_uri = client._memory_target_uri(user_id)
                     skill_uri = (
@@ -445,6 +448,7 @@ class VikingSearchTool(OVFileTool):
                         target_uris = self._dedupe_strings(
                             [
                                 "viking://resources/",
+                                "viking://wiki/nodes",
                                 self._current_memory_uri(client),
                                 self._current_skill_uri(client),
                                 *self._peer_memory_uris(client, tool_context, peer_ids=peer_ids),
@@ -584,6 +588,25 @@ class VikingGrepTool(OVFileTool):
             "required": ["pattern"],
         }
 
+    def _grep_retrieval_uris(
+        self,
+        client: VikingClient,
+        tool_context: ToolContext,
+        uri: str | None,
+    ) -> list[str]:
+        if not self._is_default_root_uri(uri):
+            return self._fs_retrieval_uris(client, tool_context, uri)
+
+        return self._dedupe_strings(
+            [
+                "viking://resources/",
+                "viking://wiki/nodes",
+                self._current_memory_uri(client),
+                self._current_skill_uri(client),
+                *self._peer_memory_uris(client, tool_context),
+            ]
+        )
+
     async def execute(
         self,
         tool_context: "ToolContext",
@@ -596,7 +619,7 @@ class VikingGrepTool(OVFileTool):
         try:
             client = await self._get_client(tool_context)
             matches = []
-            target_uris = self._fs_retrieval_uris(client, tool_context, uri)
+            target_uris = self._grep_retrieval_uris(client, tool_context, uri)
             for target_uri in target_uris:
                 try:
                     result = await client.grep(
@@ -885,7 +908,7 @@ class VikingMultiReadTool(OVFileTool):
                 "uris": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": 'List of Viking file URIs to read from (e.g., ["viking://resources/path/123.md", "viking://resources/path/456.md"])',
+                    "description": 'List of Viking file URIs to read from (e.g., ["viking://resources/path/123.md", "viking://wiki/nodes/topic/documents/0001.md"])',
                 },
             },
             "required": ["uris"],

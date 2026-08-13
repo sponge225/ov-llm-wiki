@@ -178,6 +178,73 @@ class QuickSearchStorage(DummyStorage):
         return [_result(f"{parent_uri}/should-not-be-returned", 1.0, abstract="child")]
 
 
+class ChannelSearchStorage(DummyStorage):
+    async def search_in_tenant(
+        self,
+        ctx,
+        query_vector=None,
+        sparse_query_vector=None,
+        context_type=None,
+        target_directories=None,
+        extra_filter=None,
+        level=None,
+        limit: int = 10,
+        offset: int = 0,
+    ):
+        self.search_calls.append(
+            {
+                "ctx": ctx,
+                "query_vector": query_vector,
+                "sparse_query_vector": sparse_query_vector,
+                "context_type": context_type,
+                "target_directories": target_directories,
+                "extra_filter": extra_filter,
+                "level": level,
+                "limit": limit,
+                "offset": offset,
+            }
+        )
+        targets = target_directories or []
+        if targets and all(target.startswith("viking://wiki") for target in targets):
+            return [
+                _result(
+                    "/wiki/nodes/steam/documents/0001.md",
+                    0.95,
+                    abstract="wiki document",
+                )
+            ]
+        return [
+            _result("viking://resources/root", 0.7, level=1, abstract="resource root")
+        ]
+
+    async def search_children_in_tenant(
+        self,
+        ctx,
+        parent_uri: str,
+        query_vector=None,
+        sparse_query_vector=None,
+        context_type=None,
+        target_directories=None,
+        extra_filter=None,
+        limit: int = 10,
+    ):
+        self.child_search_calls.append(
+            {
+                "ctx": ctx,
+                "parent_uri": parent_uri,
+                "query_vector": query_vector,
+                "sparse_query_vector": sparse_query_vector,
+                "context_type": context_type,
+                "target_directories": target_directories,
+                "extra_filter": extra_filter,
+                "limit": limit,
+            }
+        )
+        if parent_uri == "viking://resources":
+            return [_result("viking://resources/file", 0.9, abstract="resource file")]
+        return []
+
+
 class DirectChildProxy:
     async def search_children_in_tenant(
         self,
@@ -444,10 +511,13 @@ async def test_quick_mode_uses_single_vector_search_without_rerank_or_recursion(
         pytest.approx(0.9),
         pytest.approx(0.85),
     ]
-    assert len(storage.search_calls) == 1
+    assert len(storage.search_calls) == 2
     assert storage.search_calls[0]["limit"] == retriever.GLOBAL_SEARCH_TOPK
     assert storage.search_calls[0]["extra_filter"] is None
     assert storage.search_calls[0]["level"] is None
+    assert storage.search_calls[1]["target_directories"] == ["viking://wiki/nodes"]
+    assert storage.search_calls[1]["extra_filter"] is None
+    assert storage.search_calls[1]["level"] == [2]
     assert storage.child_search_calls == []
     assert fake_client.calls == []
 
@@ -481,7 +551,7 @@ async def test_quick_mode_pushes_explicit_level_filter_to_vector_search():
         "viking://resources/file-b",
         "viking://resources/file-a",
     ]
-    assert len(storage.search_calls) == 1
+    assert len(storage.search_calls) == 2
     assert storage.search_calls[0]["limit"] == retriever.GLOBAL_SEARCH_TOPK
     assert storage.search_calls[0]["extra_filter"] == {
         "op": "must",
@@ -489,6 +559,13 @@ async def test_quick_mode_pushes_explicit_level_filter_to_vector_search():
         "conds": ["doc"],
     }
     assert storage.search_calls[0]["level"] == [2]
+    assert storage.search_calls[1]["target_directories"] == ["viking://wiki/nodes"]
+    assert storage.search_calls[1]["extra_filter"] == {
+        "op": "must",
+        "field": "category",
+        "conds": ["doc"],
+    }
+    assert storage.search_calls[1]["level"] == [2]
     assert storage.child_search_calls == []
 
 
@@ -637,3 +714,99 @@ async def test_convert_to_matched_contexts_returns_empty_relations():
     )
 
     assert result[0].relations == []
+
+
+@pytest.mark.asyncio
+async def test_convert_to_matched_contexts_returns_viking_uri_for_index_path():
+    retriever = HierarchicalRetriever(
+        storage=DummyStorage(),
+        embedder=None,
+        rerank_config=None,
+    )
+
+    result = await retriever._convert_to_matched_contexts(
+        [_result("/wiki/nodes/steam/documents/0001.md", 1.0, abstract="wiki doc")],
+        ctx=_ctx(),
+    )
+
+    assert result[0].uri == "viking://wiki/nodes/steam/documents/0001.md"
+
+
+@pytest.mark.asyncio
+async def test_global_retrieve_merges_resource_recursion_and_wiki_document_channel():
+    storage = ChannelSearchStorage()
+    retriever = HierarchicalRetriever(
+        storage=storage,
+        embedder=DummyEmbedder(),
+        rerank_config=None,
+    )
+
+    result = await retriever.retrieve(_query(), ctx=_ctx(), limit=5, mode=RetrieverMode.THINKING)
+
+    assert [ctx.uri for ctx in result.matched_contexts] == [
+        "viking://wiki/nodes/steam/documents/0001.md",
+        "viking://resources/file",
+    ]
+    assert storage.search_calls[0]["target_directories"] == []
+    assert storage.search_calls[0]["level"] == [0, 1]
+    assert storage.search_calls[1]["target_directories"] == ["viking://wiki/nodes"]
+    assert storage.search_calls[1]["extra_filter"] is None
+    assert storage.search_calls[1]["level"] == [2]
+    assert storage.child_search_calls
+
+
+@pytest.mark.asyncio
+async def test_wiki_target_uses_only_wiki_document_channel():
+    storage = ChannelSearchStorage()
+    retriever = HierarchicalRetriever(
+        storage=storage,
+        embedder=DummyEmbedder(),
+        rerank_config=None,
+    )
+    query = TypedQuery(
+        query="hello",
+        context_type=ContextType.RESOURCE,
+        intent="",
+        target_directories=["viking://wiki/nodes/steam"],
+    )
+
+    result = await retriever.retrieve(query, ctx=_ctx(), limit=5, mode=RetrieverMode.THINKING)
+
+    assert [ctx.uri for ctx in result.matched_contexts] == [
+        "viking://wiki/nodes/steam/documents/0001.md"
+    ]
+    assert len(storage.search_calls) == 1
+    assert storage.search_calls[0]["target_directories"] == ["viking://wiki/nodes/steam"]
+    assert storage.search_calls[0]["extra_filter"] is None
+    assert storage.search_calls[0]["level"] == [2]
+    assert storage.child_search_calls == []
+
+
+@pytest.mark.asyncio
+async def test_wiki_document_channel_passes_user_scope_filter():
+    storage = ChannelSearchStorage()
+    retriever = HierarchicalRetriever(
+        storage=storage,
+        embedder=DummyEmbedder(),
+        rerank_config=None,
+    )
+    query = TypedQuery(
+        query="hello",
+        context_type=ContextType.RESOURCE,
+        intent="",
+        target_directories=["viking://wiki"],
+    )
+
+    await retriever.retrieve(
+        query,
+        ctx=_ctx(),
+        limit=5,
+        mode=RetrieverMode.THINKING,
+        scope_dsl={"op": "must", "field": "category", "conds": ["doc"]},
+    )
+
+    assert storage.search_calls[0]["extra_filter"] == {
+        "op": "must",
+        "field": "category",
+        "conds": ["doc"],
+    }

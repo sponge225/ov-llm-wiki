@@ -1,0 +1,69 @@
+# Wiki Benchmark 配置文件
+project_name: "Wiki_Benchmark"
+
+# ===========基础配置============
+# 数据集名称，用于标识当前评测的数据集
+dataset_name: "choose_your_dataset_here"
+
+# ===========Adapter 配置============
+# 数据集 Adapter 配置，用于加载和处理不同数据集的格式
+adapter:
+  # Adapter 模块路径（Python import 路径）
+  module: "src.adapters.your_dataset_adapter"
+  # Adapter 类名
+  class_name: "your_dataset_Adapter"
+
+# ===========执行配置============
+execution:
+  # 执行模式："vikingbot" 表示问答时使用 OpenViking Wiki 资源
+  mode: "vikingbot"
+  # VikingBot 模式使用的本地 OpenViking server 端口
+  server_port: 20001
+  # 并行处理 QA 任务的最大 worker 线程数
+  max_workers: 10
+  # 检索返回的文档数量（top-k）
+  retrieval_topk: 5
+  # 限制最多处理的 query 数量，null 表示处理全部 query
+  max_queries: null
+  # 是否跳过文档入库阶段，true 表示使用已有向量索引
+  skip_ingestion: false
+  # 文档入库模式
+  # - "directory": 目录整体入库模式，将整个目录作为一个文档处理
+  # - "per_file": 按文件入库模式，每个文件作为一个独立文档处理
+  ingest_mode: "per_file"
+  # add_resource 语义索引完成后，是否构建 Wiki cards/nodes
+  build_wiki: true
+  # Wiki card 输入模式：
+  # - "summary": 递归读取语义记录摘要和目录 overview 文本
+  # - "raw_chunk": 递归读取原始资源叶子节点内容
+  wiki_card_input_mode: "summary"
+  # 每个文档用于 card 生成的最大字符数
+  wiki_max_card_input_chars: 20000
+  # 检索指令，默认留空
+  retrieval_instruction: ""
+
+# ===========路径配置============
+# 所有路径都支持 {dataset_name} 占位符，运行时会自动替换为当前数据集名称
+paths:
+  # 数据集目录或文件路径
+  dataset_path: "datasets/{dataset_name}"
+  # 处理后文档的输出目录
+  doc_output_dir: "wiki_storage/{dataset_name}/{dataset_name}_processed_docs"
+  # 向量索引存储目录
+  vector_store: "wiki_storage/{dataset_name}/{dataset_name}_viking_store_index"
+  # 结果输出目录
+  output_dir: "Output/{dataset_name}/wiki"
+  # 日志文件路径
+  log_file: "Output/{dataset_name}/wiki/benchmark.log"
+
+# ===========LLM 配置============
+# 用于答案生成和评测的大语言模型配置
+llm:
+  # 模型名称
+  model: "doubao-seed-2-0-pro-260215"
+  # 生成温度，0 表示输出更稳定，值越高随机性越强
+  temperature: 0
+  # API 服务地址
+  base_url: "https://ark.cn-beijing.volces.com/api/v3"
+  # API key，请妥善保管，不要提交到代码仓库
+  api_key: "your_api_key_here"

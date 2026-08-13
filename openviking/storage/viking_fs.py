@@ -2075,6 +2075,11 @@ class VikingFS:
 
         real_ctx = self._ctx_or_default(ctx)
         retrieval_targets = resolve_retrieval_targets(target_uri, real_ctx)
+        explicit_target_directories = (
+            retrieval_targets.target_directories
+            if retrieval_targets.first_explicit_directory
+            else []
+        )
 
         for target_dir in retrieval_targets.target_directories:
             self._ensure_access(target_dir, ctx)
@@ -2098,7 +2103,7 @@ class VikingFS:
             query=query,
             context_type=None,
             intent="",
-            target_directories=retrieval_targets.target_directories,
+            target_directories=explicit_target_directories,
             embedding_input=(
                 build_multimodal_embedding_input(query, image_url) if image_url else None
             ),
@@ -2175,6 +2180,11 @@ class VikingFS:
         real_ctx = self._ctx_or_default(ctx)
         retrieval_targets = resolve_retrieval_targets(target_uri, real_ctx)
         primary_target_uri = retrieval_targets.first_explicit_directory
+        explicit_target_directories = (
+            retrieval_targets.target_directories
+            if primary_target_uri
+            else []
+        )
 
         session_summary = (
             str(session_info.get("latest_archive_overview") or "") if session_info else ""
@@ -2202,7 +2212,7 @@ class VikingFS:
                     context_type=None,
                     intent="",
                     priority=1,
-                    target_directories=retrieval_targets.target_directories,
+                    target_directories=explicit_target_directories,
                     embedding_input=build_multimodal_embedding_input(query, image_url),
                     image_query=True,
                 )
@@ -2218,7 +2228,7 @@ class VikingFS:
                 )
             typed_queries = query_plan.queries
             for tq in typed_queries:
-                tq.target_directories = retrieval_targets.target_directories
+                tq.target_directories = explicit_target_directories
         else:
             # No session context: create query directly
             typed_queries = [
@@ -2227,7 +2237,7 @@ class VikingFS:
                     context_type=None,
                     intent="",
                     priority=1,
-                    target_directories=retrieval_targets.target_directories,
+                    target_directories=explicit_target_directories,
                 )
             ]
         telemetry.set("search.typed_queries_count", len(typed_queries))

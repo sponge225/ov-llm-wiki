@@ -2527,6 +2527,7 @@ async def test_openviking_search_uses_user_namespace(monkeypatch):
     assert "sender-1/memories" in result
     assert calls == [
         ("viking://resources/", None),
+        ("viking://wiki/nodes", None),
         ("viking://user/sender-1/memories/", "sender-1"),
         ("viking://user/sender-1/skills/", "sender-1"),
     ]
@@ -2560,6 +2561,7 @@ async def test_openviking_search_user_key_mode_uses_current_user_namespace(monke
     assert "sender-1/memories" in result
     assert calls == [
         ("viking://resources/", None),
+        ("viking://wiki/nodes", None),
         ("viking://user/memories/", None),
         ("viking://user/skills/", None),
         ("viking://user/peers/sender-0/memories/", None),
@@ -2611,6 +2613,7 @@ async def test_openviking_search_actor_client_expands_current_peer_scope(monkeyp
     assert "sender-0/memories" in result
     assert calls == [
         ("viking://resources/", None),
+        ("viking://wiki/nodes", None),
         ("viking://user/memories/", None),
         ("viking://user/skills/", None),
         ("viking://user/peers/sender-0/memories/", None),

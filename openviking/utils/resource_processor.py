@@ -8,6 +8,7 @@ as described in the OpenViking design document.
 """
 
 import inspect
+import re
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
@@ -28,9 +29,11 @@ from openviking.storage.viking_fs import LS_ALL_NODES, get_viking_fs
 from openviking.telemetry import get_current_telemetry
 from openviking.utils.embedding_utils import index_resource
 from openviking.utils.summarizer import Summarizer
+from openviking.wiki_mvp.schemas import ResourceDocumentDraft, WikiResourceInput
 from openviking_cli.exceptions import OpenVikingError
 from openviking_cli.utils import get_logger
 from openviking_cli.utils.storage import StoragePath
+from openviking_cli.utils.uri import VikingURI
 
 if TYPE_CHECKING:
     from openviking.parse.accessors.base import LocalResource
@@ -146,6 +149,7 @@ class ResourceProcessor:
         to: Optional[str] = None,
         parent: Optional[str] = None,
         summarize: bool = False,
+        build_wiki: bool = False,
         stage_callback: Optional[Callable[[str], Any]] = None,
         prepared_resource: Optional["LocalResource"] = None,
         **kwargs,
@@ -400,6 +404,12 @@ class ResourceProcessor:
                 "target_preexisting": target_preexisting,
                 "is_code_repo": parse_result.source_format == "repository",
             }
+            if build_wiki and root_uri:
+                result["_wiki_resource_inputs"] = self._finalize_wiki_resource_inputs(
+                    parse_result.wiki_document_drafts,
+                    root_uri=str(root_uri),
+                    source_format=parse_result.source_format,
+                )
             if defer_post_processing:
                 result["_post_process"] = prepared
                 result["_resource_lock"] = resource_lock
@@ -493,6 +503,64 @@ class ResourceProcessor:
             finally:
                 await resource_lock.close()
         return result
+
+    @staticmethod
+    def _finalize_wiki_resource_inputs(
+        drafts: list[ResourceDocumentDraft],
+        *,
+        root_uri: str,
+        source_format: Optional[str] = None,
+    ) -> list[WikiResourceInput]:
+        if not drafts:
+            doc_id = ResourceProcessor._wiki_doc_id_from_uri(root_uri)
+            return [
+                WikiResourceInput(
+                    doc_id=doc_id,
+                    resource_uri=root_uri,
+                    title=doc_id.replace("_", " ").title(),
+                    source_type="resource_document",
+                    document_dir_uri=root_uri,
+                    metadata={
+                        "root_uri": root_uri,
+                        "relative_uri": "",
+                        "generated_from_add_resource": True,
+                        "generated_from_fallback": True,
+                    },
+                )
+            ]
+        inputs: list[WikiResourceInput] = []
+        for draft in drafts:
+            relative_uri = str(draft.relative_uri or "").strip("/")
+            if source_format != "directory" and len(drafts) == 1:
+                relative_uri = ""
+            resource_uri = VikingURI(root_uri).join(relative_uri).uri if relative_uri else root_uri
+            metadata = dict(draft.metadata or {})
+            metadata.update(
+                {
+                    "root_uri": root_uri,
+                    "relative_uri": relative_uri,
+                    "generated_from_add_resource": True,
+                }
+            )
+            inputs.append(
+                WikiResourceInput(
+                    doc_id=draft.doc_id,
+                    resource_uri=resource_uri,
+                    title=draft.title,
+                    source_type=draft.source_type,
+                    summary=draft.summary,
+                    abstract=draft.abstract,
+                    document_dir_uri=resource_uri,
+                    metadata=metadata,
+                )
+            )
+        return inputs
+
+    @staticmethod
+    def _wiki_doc_id_from_uri(uri: str) -> str:
+        tail = str(uri or "").rstrip("/").rsplit("/", 1)[-1]
+        normalized = re.sub(r"[^A-Za-z0-9]+", "_", tail).strip("_")
+        return normalized or "resource_document"
 
     async def reserve_unique_candidate(
         self,

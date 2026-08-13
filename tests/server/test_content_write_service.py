@@ -382,6 +382,16 @@ class _FakeVikingFS:
         return self.vector_store
 
 
+class _FakeVikingDB:
+    def __init__(self, *, enqueue_result: bool = True):
+        self.enqueue_result = enqueue_result
+        self.embedding_messages = []
+
+    async def enqueue_embedding_msg(self, msg):
+        self.embedding_messages.append(msg)
+        return self.enqueue_result
+
+
 class _FakeSemanticQueue:
     def __init__(self):
         self.messages = []
@@ -594,6 +604,86 @@ async def test_resource_write_updates_target_and_queues_refresh_before_return(mo
     assert captured_enqueue["changed_uri"] == file_uri
     assert captured_enqueue["change_type"] == "modified"
     assert viking_fs.delete_temp_calls == []
+    assert lock_manager.release_calls == ["lock-1"]
+
+
+@pytest.mark.asyncio
+async def test_wiki_write_skips_semantic_sidecars(monkeypatch):
+    file_uri = "viking://wiki/nodes/topic/node.md"
+    root_uri = "viking://wiki/nodes/topic"
+    ctx = RequestContext(user=UserIdentifier.the_default_user(), role=Role.USER)
+    viking_fs = _FakeVikingFS(file_uri=file_uri, root_uri=root_uri)
+    vikingdb = _FakeVikingDB()
+    coordinator = ContentWriteCoordinator(viking_fs=viking_fs, vikingdb=vikingdb)
+    lock_manager = _FakeLockManager()
+
+    monkeypatch.setattr(
+        "openviking.storage.content_write.get_lock_manager",
+        lambda: lock_manager,
+    )
+
+    async def _fail_enqueue_semantic_refresh(**kwargs):
+        del kwargs
+        raise AssertionError("wiki writes should not enqueue semantic sidecars")
+
+    monkeypatch.setattr(coordinator, "_enqueue_semantic_refresh", _fail_enqueue_semantic_refresh)
+
+    result = await coordinator.write(
+        uri=file_uri,
+        content="# Topic",
+        ctx=ctx,
+        mode="replace",
+        wait=False,
+    )
+
+    assert viking_fs.content[file_uri] == "# Topic"
+    assert vikingdb.embedding_messages == []
+    assert result["semantic_status"] == "skipped"
+    assert result["vector_status"] == "skipped"
+    assert lock_manager.release_calls == ["lock-1"]
+
+
+@pytest.mark.asyncio
+async def test_wiki_node_document_write_enqueues_embedding_without_semantic_sidecars(monkeypatch):
+    file_uri = "viking://wiki/nodes/topic/documents/0001.md"
+    root_uri = "viking://wiki/nodes/topic/documents"
+    ctx = RequestContext(user=UserIdentifier.the_default_user(), role=Role.USER)
+    viking_fs = _FakeVikingFS(file_uri=file_uri, root_uri=root_uri)
+    vikingdb = _FakeVikingDB()
+    coordinator = ContentWriteCoordinator(viking_fs=viking_fs, vikingdb=vikingdb)
+    lock_manager = _FakeLockManager()
+
+    monkeypatch.setattr(
+        "openviking.storage.content_write.get_lock_manager",
+        lambda: lock_manager,
+    )
+
+    async def _fail_enqueue_semantic_refresh(**kwargs):
+        del kwargs
+        raise AssertionError("wiki writes should not enqueue semantic sidecars")
+
+    monkeypatch.setattr(coordinator, "_enqueue_semantic_refresh", _fail_enqueue_semantic_refresh)
+
+    result = await coordinator.write(
+        uri=file_uri,
+        content="# Topic\n\nHigh-level wiki knowledge.",
+        ctx=ctx,
+        mode="replace",
+        wait=False,
+    )
+
+    assert viking_fs.content[file_uri] == "# Topic\n\nHigh-level wiki knowledge."
+    assert len(vikingdb.embedding_messages) == 1
+    embedding_msg = vikingdb.embedding_messages[0]
+    assert embedding_msg.message == "# Topic\n\nHigh-level wiki knowledge."
+    assert embedding_msg.context_data["uri"] == file_uri
+    assert embedding_msg.context_data["type"] == "wiki_node_document"
+    assert embedding_msg.context_data["context_type"] == "resource"
+    assert embedding_msg.context_data["category"] == "wiki"
+    assert embedding_msg.context_data["level"] == 2
+    assert embedding_msg.context_data["meta"] == {"asset_type": "wiki_node_document"}
+    assert result["semantic_status"] == "skipped"
+    assert result["vector_status"] == "queued"
     assert lock_manager.release_calls == ["lock-1"]
 
 

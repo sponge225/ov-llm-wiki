@@ -1,0 +1,30 @@
+{
+  "storage": {
+    "agfs": {
+    }
+  },
+  "log": {
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "output": "stdout"
+  },
+  "embedding": {
+    "dense": {
+        "model": "${OV_EMBEDDING_MODEL}",
+        "api_key": "${OV_EMBEDDING_API_KEY}",
+        "api_base": "${OV_EMBEDDING_API_BASE}",
+        "dimension": "${OV_EMBEDDING_DIMENSION}",
+        "provider": "${OV_EMBEDDING_PROVIDER}",
+        "input": "${OV_EMBEDDING_INPUT}"
+    }
+  },
+  "vlm": {
+    "model": "${OV_VLM_MODEL}",
+    "api_key": "${OV_VLM_API_KEY}",
+    "api_base": "${OV_VLM_API_BASE}",
+    "temperature": 0.0,
+    "max_retries": 240,
+    "provider": "${OV_VLM_PROVIDER}",
+    "thinking": false
+  }
+}

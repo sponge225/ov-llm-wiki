@@ -1,0 +1,34 @@
+# Wiki Benchmark Configuration File
+project_name: "Wiki_Benchmark"
+dataset_name: "qasper_30"
+
+adapter:
+  module: "src.adapters.qasper_adapter"
+  class_name: "QasperAdapter"
+
+execution:
+  mode: "vikingbot"
+  server_port: 2026
+  max_workers: 1
+  retrieval_topk: 5
+  max_queries: 2
+  skip_ingestion: false
+  ingest_mode: "directory"
+  build_wiki: true
+  wiki_card_input_mode: "summary"
+  wiki_max_card_input_chars: 20000
+  retrieval_instruction: ""
+
+paths:
+  dataset_path: "datasets/Qasper"
+  doc_output_dir: "wiki_storage/{dataset_name}/{dataset_name}_processed_docs"
+  vector_store: "wiki_storage/{dataset_name}/{dataset_name}_viking_store_index"
+  output_dir: "Output/{dataset_name}/wiki"
+  log_file: "Output/{dataset_name}/wiki/benchmark.log"
+
+llm:
+  model: "${OV_VLM_MODEL}"
+  provider: "${OV_VLM_PROVIDER}"
+  temperature: 0
+  base_url: "${OV_VLM_API_BASE}"
+  api_key_env_var: "OV_VLM_API_KEY"

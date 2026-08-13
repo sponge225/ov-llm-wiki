@@ -17,6 +17,7 @@ CodeRepositoryParser:
 """
 
 import time
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
@@ -30,6 +31,7 @@ from openviking.parse.image_rewrite import IMAGE_MAPPINGS_FILENAME
 from openviking.parse.parsers.base_parser import BaseParser
 from openviking.parse.parsers.media.constants import MEDIA_EXTENSIONS
 from openviking.storage.viking_fs import LS_ALL_NODES
+from openviking.wiki_mvp.schemas import ResourceDocumentDraft
 from openviking_cli.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -41,6 +43,12 @@ logger = get_logger(__name__)
 # Hidden files a parser's temp tree is allowed to carry through the merge.
 # Everything else hidden stays filtered, like a default ls.
 _MERGE_SIDECAR_ALLOWLIST = frozenset({IMAGE_MAPPINGS_FILENAME})
+
+
+@dataclass
+class _ProcessedFileResult:
+    ok: bool
+    drafts: list[ResourceDocumentDraft] = field(default_factory=list)
 
 
 class DirectoryParser(BaseParser):
@@ -170,6 +178,7 @@ class DirectoryParser(BaseParser):
             file_count = 0
             processed_files: List[Dict[str, str]] = []
             failed_files: List[Dict[str, str]] = []
+            wiki_document_drafts: list[ResourceDocumentDraft] = []
 
             for cf in processable_files:
                 file_parser = self._assign_parser(cf, registry)
@@ -193,10 +202,11 @@ class DirectoryParser(BaseParser):
                         warnings,
                         preserve_structure=preserve_structure,
                     )
+                    process_result = _ProcessedFileResult(ok=ok)
                     parser_name = "direct_upload"
                 else:
                     # Normal processing with parser
-                    ok = await self._process_single_file(
+                    process_result = await self._process_single_file(
                         cf,
                         file_parser,
                         target_uri,
@@ -205,9 +215,11 @@ class DirectoryParser(BaseParser):
                         preserve_structure=preserve_structure,
                         import_root=str(source_path),
                     )
+                    ok = process_result.ok
 
                 if ok:
                     file_count += 1
+                    wiki_document_drafts.extend(process_result.drafts)
                     processed_files.append(
                         {
                             "path": cf.rel_path,
@@ -252,6 +264,7 @@ class DirectoryParser(BaseParser):
                 parser_name="DirectoryParser",
                 parse_time=time.time() - start_time,
                 warnings=warnings,
+                wiki_document_drafts=wiki_document_drafts,
             )
             result.temp_dir_path = temp_uri
             result.meta["file_count"] = file_count
@@ -358,7 +371,7 @@ class DirectoryParser(BaseParser):
         warnings: List[str],
         preserve_structure: bool = True,
         import_root: Optional[str] = None,
-    ) -> bool:
+    ) -> _ProcessedFileResult:
         """Process one file into the VikingFS directory temp.
 
         - Files WITH a parser → ``parser.parse()`` → merge output into
@@ -371,7 +384,7 @@ class DirectoryParser(BaseParser):
                 *target_uri* (flat).
 
         Returns:
-            *True* on success, *False* on failure.
+            Processing status and any lightweight Wiki document drafts.
         """
         rel_path = classified_file.rel_path
         src_file = classified_file.path
@@ -393,29 +406,78 @@ class DirectoryParser(BaseParser):
                     if preserve_structure:
                         parent = str(PurePosixPath(rel_path).parent)
                         dest = f"{target_uri}/{parent}" if parent != "." else target_uri
+                        relative_prefix = "" if parent == "." else parent
                     else:
                         dest = target_uri
+                        relative_prefix = ""
                     await DirectoryParser._merge_temp(
                         viking_fs,
                         sub_result.temp_dir_path,
                         dest,
                     )
-                return True
+                drafts = DirectoryParser._prefix_wiki_drafts(
+                    sub_result.wiki_document_drafts,
+                    relative_prefix=relative_prefix,
+                )
+                return _ProcessedFileResult(ok=True, drafts=drafts)
             except Exception as exc:
                 warnings.append(f"Failed to parse {rel_path}: {exc}")
-                return False
+                return _ProcessedFileResult(ok=False)
         else:
             try:
                 content = src_file.read_bytes()
                 if preserve_structure:
                     dst_uri = f"{target_uri}/{rel_path}"
+                    relative_uri = str(PurePosixPath(rel_path))
                 else:
-                    dst_uri = f"{target_uri}/{PurePosixPath(rel_path).name}"
+                    name = PurePosixPath(rel_path).name
+                    dst_uri = f"{target_uri}/{name}"
+                    relative_uri = str(name)
                 await viking_fs.write_file(dst_uri, content)
-                return True
+                if DirectoryParser._is_text_like(src_file):
+                    draft = ResourceDocumentDraft(
+                        doc_id=DirectoryParser._wiki_doc_id(relative_uri),
+                        title=PurePosixPath(relative_uri).name,
+                        source_type="resource_document",
+                        abstract=PurePosixPath(relative_uri).name,
+                        metadata={
+                            "parser_name": "DirectoryParser",
+                            "source_path": str(src_file),
+                            "source_format": src_file.suffix.lstrip(".") or "file",
+                        },
+                        relative_uri=relative_uri,
+                    )
+                    return _ProcessedFileResult(ok=True, drafts=[draft])
+                return _ProcessedFileResult(ok=True)
             except Exception as exc:
                 warnings.append(f"Failed to upload {rel_path}: {exc}")
-                return False
+                return _ProcessedFileResult(ok=False)
+
+    @staticmethod
+    def _prefix_wiki_drafts(
+        drafts: list[ResourceDocumentDraft],
+        *,
+        relative_prefix: str,
+    ) -> list[ResourceDocumentDraft]:
+        if not relative_prefix:
+            return list(drafts)
+        prefixed: list[ResourceDocumentDraft] = []
+        prefix = str(PurePosixPath(relative_prefix))
+        for draft in drafts:
+            relative_uri = str(PurePosixPath(prefix) / draft.relative_uri)
+            prefixed.append(draft.model_copy(update={"relative_uri": relative_uri}))
+        return prefixed
+
+    @staticmethod
+    def _is_text_like(path: Path) -> bool:
+        return path.suffix.lower() in {".txt", ".text", ".md", ".markdown", ".json", ".yaml", ".yml"}
+
+    @staticmethod
+    def _wiki_doc_id(value: str) -> str:
+        import re
+
+        normalized = re.sub(r"[^a-zA-Z0-9_]+", "_", str(value or "document")).strip("_")
+        return normalized or "document"
 
     @staticmethod
     async def _upload_file_directly(

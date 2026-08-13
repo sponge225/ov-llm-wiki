@@ -13,6 +13,8 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from openviking.wiki_mvp.schemas import ResourceDocumentDraft
+
 if TYPE_CHECKING:
     pass
 
@@ -300,6 +302,7 @@ class ParseResult:
 
     meta: Dict[str, Any] = field(default_factory=dict)
     warnings: List[str] = field(default_factory=list)
+    wiki_document_drafts: List[ResourceDocumentDraft] = field(default_factory=list)
 
     @property
     def success(self) -> bool:
@@ -345,6 +348,7 @@ def create_parse_result(
     parse_time: Optional[float] = None,
     meta: Optional[Dict[str, Any]] = None,
     warnings: Optional[List[str]] = None,
+    wiki_document_drafts: Optional[List[ResourceDocumentDraft]] = None,
 ) -> ParseResult:
     """
     Helper function to create ParseResult with all new fields populated.
@@ -372,4 +376,5 @@ def create_parse_result(
         parse_timestamp=datetime.now() if parse_time is not None else None,
         meta=meta or {},
         warnings=warnings or [],
+        wiki_document_drafts=wiki_document_drafts or [],
     )

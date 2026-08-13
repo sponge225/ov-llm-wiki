@@ -190,6 +190,7 @@ AGENT_SHARED_ROOTS: tuple[str, ...] = ("viking://agent/skills",)
 def visible_roots(ctx: RequestContext) -> list[str]:
     return [
         "viking://resources",
+        "viking://wiki",
         *AGENT_SHARED_ROOTS,
         canonical_user_root(ctx),
     ]

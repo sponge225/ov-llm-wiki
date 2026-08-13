@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0
 """Resource endpoints for OpenViking HTTP Server."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -85,6 +85,9 @@ class AddResourceRequest(BaseModel):
     args: Dict[str, Any] = Field(default_factory=dict)
     telemetry: TelemetryRequest = False
     watch_interval: float = 0
+    build_wiki: bool = False
+    wiki_card_input_mode: Literal["summary", "raw_chunk"] = "summary"
+    wiki_max_card_input_chars: int = 20000
 
     @model_validator(mode="after")
     def check_path_or_temp_file_id(self):
@@ -228,6 +231,9 @@ async def add_resource(
                 instruction=request.instruction,
                 wait=request.wait,
                 timeout=request.timeout,
+                build_wiki=request.build_wiki,
+                wiki_card_input_mode=request.wiki_card_input_mode,
+                wiki_max_card_input_chars=request.wiki_max_card_input_chars,
                 allow_local_path_resolution=allow_local_path_resolution,
                 enforce_public_remote_targets=True,
                 args=request.args,

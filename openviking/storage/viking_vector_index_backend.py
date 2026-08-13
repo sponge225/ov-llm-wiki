@@ -1286,7 +1286,7 @@ class VikingVectorIndexBackend:
                     break
 
         merged_filter = self._merge_filters(
-            PathScope("uri", parent_uri, depth=1),
+            self._path_scope_filter("uri", parent_uri, depth=1, ctx=ctx),
             self._build_scope_filter(
                 ctx=ctx,
                 context_type=context_type,
@@ -1484,7 +1484,11 @@ class VikingVectorIndexBackend:
             filters.append(tenant_filter)
 
         if canonical_targets:
-            uri_conds = [PathScope("uri", target_dir, depth=-1) for target_dir in canonical_targets]
+            uri_conds = [
+                path_scope
+                for target_dir in canonical_targets
+                for path_scope in self._path_scope_filters("uri", target_dir, depth=-1, ctx=ctx)
+            ]
             if uri_conds:
                 filters.append(Or(uri_conds))
 
@@ -1521,10 +1525,56 @@ class VikingVectorIndexBackend:
             return None
 
         account_filter = Eq("account_id", ctx.account_id)
-        path_filter = Or([PathScope("uri", root, depth=-1) for root in visible_roots(ctx)])
+        path_filter = Or(
+            [
+                path_scope
+                for root in visible_roots(ctx)
+                for path_scope in VikingVectorIndexBackend._path_scope_filters(
+                    "uri", root, depth=-1, ctx=ctx
+                )
+            ]
+        )
         if context_type:
             return And([account_filter, path_filter])
         return And([account_filter, path_filter])
+
+    @staticmethod
+    def _path_scope_filter(
+        field: str,
+        uri: str,
+        *,
+        depth: int,
+        ctx: RequestContext,
+    ) -> FilterExpr:
+        filters = VikingVectorIndexBackend._path_scope_filters(field, uri, depth=depth, ctx=ctx)
+        return filters[0] if len(filters) == 1 else Or(filters)
+
+    @staticmethod
+    def _path_scope_filters(
+        field: str,
+        uri: str,
+        *,
+        depth: int,
+        ctx: RequestContext,
+    ) -> List[PathScope]:
+        paths = VikingVectorIndexBackend._index_uri_variants(uri, ctx)
+        return [PathScope(field, path, depth=depth) for path in paths]
+
+    @staticmethod
+    def _index_uri_variants(uri: str, ctx: RequestContext) -> List[str]:
+        canonical = canonicalize_uri(uri, ctx).rstrip("/")
+        index_path = VikingVectorIndexBackend._index_path_for_canonical_uri(canonical)
+        variants: List[str] = []
+        for value in (canonical, index_path):
+            if value and value not in variants:
+                variants.append(value)
+        return variants
+
+    @staticmethod
+    def _index_path_for_canonical_uri(uri: str) -> str:
+        if uri.startswith("viking://"):
+            return "/" + uri[len("viking://") :].strip("/")
+        return uri.rstrip("/")
 
     @staticmethod
     def _merge_filters(*filters: Optional[FilterExpr]) -> Optional[FilterExpr]:

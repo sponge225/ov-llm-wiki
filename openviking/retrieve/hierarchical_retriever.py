@@ -132,6 +132,12 @@ class HierarchicalRetriever:
         vector_proxy = VikingDBManagerProxy(self.vector_store, ctx)
 
         target_dirs = [d for d in (query.target_directories or []) if d]
+        resource_target_dirs, wiki_target_dirs = self._partition_wiki_targets(target_dirs)
+        include_wiki_channel = self._should_search_wiki_channel(
+            query.context_type,
+            target_dirs=target_dirs,
+            wiki_target_dirs=wiki_target_dirs,
+        )
 
         if not await vector_proxy.collection_exists_bound():
             logger.warning(
@@ -163,8 +169,10 @@ class HierarchicalRetriever:
                 sparse_query_vector = result.sparse_vector
 
         # Step 1: Determine starting directories based on explicit target dirs.
-        if target_dirs:
-            root_uris = target_dirs
+        if resource_target_dirs:
+            root_uris = resource_target_dirs
+        elif target_dirs:
+            root_uris = []
         else:
             root_uris = default_target_directories(ctx, context_type=query.context_type)
 
@@ -174,19 +182,21 @@ class HierarchicalRetriever:
 
         if mode == RetrieverMode.QUICK:
             search_limit = max(limit * 5, 50) if image_query else max(limit, self.GLOBAL_SEARCH_TOPK)
-            with telemetry.measure("search.vector_retrieval"):
-                quick_results = await vector_proxy.search_in_tenant(
-                    query_vector=query_vector,
-                    sparse_query_vector=sparse_query_vector,
-                    context_type=context_type,
-                    target_directories=target_dirs,
-                    extra_filter=scope_dsl,
-                    level=level,
-                    limit=search_limit,
-                )
-            telemetry.count("vector.searches", 1)
-            telemetry.count("vector.scored", len(quick_results))
-            telemetry.count("vector.scanned", len(quick_results))
+            quick_results = []
+            if root_uris or not target_dirs:
+                with telemetry.measure("search.vector_retrieval"):
+                    quick_results = await vector_proxy.search_in_tenant(
+                        query_vector=query_vector,
+                        sparse_query_vector=sparse_query_vector,
+                        context_type=context_type,
+                        target_directories=resource_target_dirs,
+                        extra_filter=scope_dsl,
+                        level=level,
+                        limit=search_limit,
+                    )
+                telemetry.count("vector.searches", 1)
+                telemetry.count("vector.scored", len(quick_results))
+                telemetry.count("vector.scanned", len(quick_results))
 
             collected_by_uri: Dict[str, Dict[str, Any]] = {}
             for result in quick_results:
@@ -215,19 +225,21 @@ class HierarchicalRetriever:
             rerank_used = False
         else:
             # Step 2: Global vector search to supplement starting points
-            with telemetry.measure("search.vector_retrieval"):
-                global_results = await vector_proxy.search_in_tenant(
-                    query_vector=query_vector,
-                    sparse_query_vector=sparse_query_vector,
-                    context_type=context_type,
-                    target_directories=target_dirs,
-                    extra_filter=scope_dsl,
-                    level=[0, 1],
-                    limit=max(limit, self.GLOBAL_SEARCH_TOPK),
-                )
-            telemetry.count("vector.searches", 1)
-            telemetry.count("vector.scored", len(global_results))
-            telemetry.count("vector.scanned", len(global_results))
+            global_results = []
+            if root_uris or not target_dirs:
+                with telemetry.measure("search.vector_retrieval"):
+                    global_results = await vector_proxy.search_in_tenant(
+                        query_vector=query_vector,
+                        sparse_query_vector=sparse_query_vector,
+                        context_type=context_type,
+                        target_directories=resource_target_dirs,
+                        extra_filter=scope_dsl,
+                        level=[0, 1],
+                        limit=max(limit, self.GLOBAL_SEARCH_TOPK),
+                    )
+                telemetry.count("vector.searches", 1)
+                telemetry.count("vector.scored", len(global_results))
+                telemetry.count("vector.scanned", len(global_results))
 
             # Debug: Print all URIs in global_results
             if logger.isEnabledFor(logging.DEBUG):
@@ -280,25 +292,47 @@ class HierarchicalRetriever:
                     initial_candidates.append(candidate)
 
             # Step 4: Recursive search
-            with telemetry.measure("search.vector_retrieval"):
-                candidates = await self._recursive_search(
-                    vector_proxy=vector_proxy,
-                    query=query.query,
-                    query_vector=query_vector,
-                    sparse_query_vector=sparse_query_vector,
-                    starting_points=starting_points,
-                    limit=limit,
-                    mode=mode,
-                    threshold=effective_threshold,
-                    score_gte=score_gte,
-                    context_type=context_type,
-                    target_dirs=target_dirs,
-                    scope_dsl=scope_dsl,
-                    initial_candidates=initial_candidates,
-                    level=level,
-                )
+            if starting_points:
+                with telemetry.measure("search.vector_retrieval"):
+                    candidates = await self._recursive_search(
+                        vector_proxy=vector_proxy,
+                        query=query.query,
+                        query_vector=query_vector,
+                        sparse_query_vector=sparse_query_vector,
+                        starting_points=starting_points,
+                        limit=limit,
+                        mode=mode,
+                        threshold=effective_threshold,
+                        score_gte=score_gte,
+                        context_type=context_type,
+                        target_dirs=resource_target_dirs,
+                        scope_dsl=scope_dsl,
+                        initial_candidates=initial_candidates,
+                        level=level,
+                    )
+            else:
+                candidates = []
             apply_hotness = True
             rerank_used = self._rerank_client is not None and mode == RetrieverMode.THINKING
+
+        if include_wiki_channel:
+            with telemetry.measure("search.vector_retrieval"):
+                wiki_results = await self._search_wiki_documents(
+                    vector_proxy=vector_proxy,
+                    query_vector=query_vector,
+                    sparse_query_vector=sparse_query_vector,
+                    context_type=context_type,
+                    target_dirs=wiki_target_dirs,
+                    extra_filter=scope_dsl,
+                    level=level,
+                    limit=max(limit, self.GLOBAL_SEARCH_TOPK),
+                    threshold=effective_threshold,
+                    score_gte=score_gte,
+                )
+            telemetry.count("vector.searches", 1)
+            telemetry.count("vector.scored", len(wiki_results))
+            telemetry.count("vector.scanned", len(wiki_results))
+            candidates = self._merge_candidates(candidates, wiki_results)
 
         # Step 6: Convert results
         matched = await self._convert_to_matched_contexts(
@@ -320,7 +354,7 @@ class HierarchicalRetriever:
         return QueryResult(
             query=query,
             matched_contexts=final,
-            searched_directories=root_uris,
+            searched_directories=self._searched_directories(root_uris, wiki_target_dirs, include_wiki_channel),
         )
 
     def _resolve_threshold(self, threshold: Optional[float]) -> float:
@@ -340,6 +374,127 @@ class HierarchicalRetriever:
         if score_gte:
             return score >= threshold
         return score > threshold
+
+    @classmethod
+    def _partition_wiki_targets(cls, target_dirs: List[str]) -> Tuple[List[str], List[str]]:
+        resource_targets: List[str] = []
+        wiki_targets: List[str] = []
+        for target in target_dirs:
+            if cls._is_wiki_uri(target):
+                wiki_targets.append(target)
+            else:
+                resource_targets.append(target)
+        return resource_targets, wiki_targets
+
+    @classmethod
+    def _should_search_wiki_channel(
+        cls,
+        context_type: Optional[ContextType],
+        *,
+        target_dirs: List[str],
+        wiki_target_dirs: List[str],
+    ) -> bool:
+        if context_type not in (None, ContextType.RESOURCE):
+            return False
+        if target_dirs:
+            return bool(wiki_target_dirs)
+        return True
+
+    async def _search_wiki_documents(
+        self,
+        vector_proxy: VikingDBManagerProxy,
+        query_vector: Optional[List[float]],
+        sparse_query_vector: Optional[Dict[str, float]],
+        context_type: Optional[str],
+        target_dirs: List[str],
+        extra_filter: Optional[FilterExpr | Dict[str, Any]],
+        level: Optional[List[int]],
+        limit: int,
+        threshold: float,
+        score_gte: bool,
+    ) -> List[Dict[str, Any]]:
+        wiki_targets = target_dirs or ["viking://wiki/nodes"]
+        wiki_level = [2] if level is None else [value for value in level if value == 2]
+        if not wiki_level:
+            return []
+        results = await vector_proxy.search_in_tenant(
+            query_vector=query_vector,
+            sparse_query_vector=sparse_query_vector,
+            context_type=context_type or ContextType.RESOURCE.value,
+            target_directories=wiki_targets,
+            extra_filter=extra_filter,
+            level=wiki_level,
+            limit=limit,
+        )
+        wiki_results = []
+        for result in results:
+            if not self._is_wiki_document_uri(result.get("uri", "")):
+                continue
+            score = self._finite_score(result.get("_score", 0.0))
+            if not self._passes_threshold(score, threshold, score_gte):
+                continue
+            result = dict(result)
+            result["_score"] = score
+            result["_final_score"] = score
+            wiki_results.append(result)
+        return self._rank_candidates(wiki_results)
+
+    @classmethod
+    def _merge_candidates(
+        cls,
+        primary: List[Dict[str, Any]],
+        secondary: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        collected_by_uri: Dict[str, Dict[str, Any]] = {}
+        for candidate in [*primary, *secondary]:
+            uri = candidate.get("uri", "")
+            if not uri:
+                continue
+            normalized = cls._display_uri(uri)
+            current = dict(candidate)
+            current.setdefault("_final_score", current.get("_score", 0.0))
+            previous = collected_by_uri.get(normalized)
+            if previous is None or current.get("_final_score", 0.0) > previous.get(
+                "_final_score", 0.0
+            ):
+                collected_by_uri[normalized] = current
+        return cls._rank_candidates(list(collected_by_uri.values()))
+
+    @staticmethod
+    def _rank_candidates(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        for candidate in candidates:
+            candidate.setdefault("_final_score", candidate.get("_score", 0.0))
+        return sorted(
+            candidates,
+            key=lambda x: x.get("_final_score", x.get("_score", 0.0)),
+            reverse=True,
+        )
+
+    @staticmethod
+    def _searched_directories(
+        root_uris: List[str],
+        wiki_target_dirs: List[str],
+        include_wiki_channel: bool,
+    ) -> List[str]:
+        searched = list(root_uris)
+        if include_wiki_channel:
+            for uri in wiki_target_dirs or ["viking://wiki/nodes"]:
+                if uri not in searched:
+                    searched.append(uri)
+        return searched
+
+    @staticmethod
+    def _is_wiki_uri(uri: str) -> bool:
+        normalized = uri.rstrip("/")
+        return normalized == "viking://wiki" or normalized.startswith("viking://wiki/")
+
+    @classmethod
+    def _is_wiki_document_uri(cls, uri: str) -> bool:
+        display_uri = cls._display_uri(uri)
+        return (
+            display_uri.startswith("viking://wiki/nodes/")
+            and "/documents/" in display_uri
+        )
 
     async def _rerank_scores(
         self,
@@ -602,7 +757,7 @@ class HierarchicalRetriever:
             if not math.isfinite(final_score):
                 final_score = 0.0
             level = c.get("level", 2)
-            display_uri = self._append_level_suffix(c.get("uri", ""), level)
+            display_uri = self._append_level_suffix(self._display_uri(c.get("uri", "")), level)
 
             results.append(
                 MatchedContext(
@@ -635,3 +790,12 @@ class HierarchicalRetriever:
         if uri.endswith("/") and not uri.endswith("://"):
             uri = uri.rstrip("/")
         return f"{uri}/{suffix}"
+
+    @staticmethod
+    def _display_uri(uri: str) -> str:
+        """Convert indexed account-relative paths back to Viking URI form."""
+        if uri.startswith("viking://"):
+            return uri
+        if uri.startswith("/"):
+            return f"viking:/{uri}"
+        return uri

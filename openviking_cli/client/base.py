@@ -43,6 +43,9 @@ class BaseClient(ABC):
         wait: bool = False,
         timeout: Optional[float] = None,
         watch_interval: float = 0,
+        build_wiki: bool = False,
+        wiki_card_input_mode: str = "summary",
+        wiki_max_card_input_chars: int = 20000,
         args: Optional[Dict[str, Any]] = None,
         telemetry: TelemetryRequest = False,
     ) -> Dict[str, Any]:

@@ -19,6 +19,7 @@ class VikingURI:
 
     Scopes:
     - resources: Independent resource scope (viking://resources/{project}/...)
+    - wiki: Generated wiki assets scope (viking://wiki/...)
     - user: User scope (viking://user/...), including sessions under
       viking://user/{user_id}/sessions/{session_id}
     - session: Legacy alias for user sessions (viking://session/{session_id}/...)
@@ -36,6 +37,7 @@ class VikingURI:
     # SCOPES that can be listed in root directory (ov ls)
     LISTABLE_SCOPES = {
         "resources",
+        "wiki",
         "user",
         "agent",
     }

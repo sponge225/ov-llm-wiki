@@ -734,6 +734,7 @@ def prepare_agent_channel(
     markdown: bool,
     logs: bool,
     eval: bool = False,
+    output_file: Path | None = None,
     sender: str | None = None,
     memory_peer: list[str] | None = None,
     memory_user: list[str] | None = None,
@@ -757,6 +758,7 @@ def prepare_agent_channel(
             session_id=session_id,
             markdown=markdown,
             eval=eval,
+            output_file=output_file,
             sender=sender,
         )
         channels.add_channel(channel)
@@ -796,6 +798,9 @@ def chat(
     config_path: str = typer.Option(
         None, "--config", "-c", help="Path to ov.conf, default .openviking/ov.conf"
     ),
+    output_file: str = typer.Option(
+        None, "--output-file", "-o", help="Write --eval JSON output to this file"
+    ),
     sender: str = typer.Option(
         None, "--sender", help="Sender ID, same usage as feishu channel sender"
     ),
@@ -810,6 +815,7 @@ def chat(
 ):
     """Interact with the agent directly."""
     path = Path(config_path).expanduser() if config_path is not None else None
+    output_path = Path(output_file).expanduser() if output_file is not None else None
 
     bus = MessageBus()
     config = ensure_config(path)
@@ -860,6 +866,7 @@ def chat(
         markdown,
         logs,
         eval,
+        output_path,
         sender,
         memory_peer,
         memory_user,

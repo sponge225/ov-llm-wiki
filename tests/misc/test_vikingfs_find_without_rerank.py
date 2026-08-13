@@ -4,6 +4,7 @@
 
 import contextvars
 from unittest.mock import MagicMock
+from unittest.mock import call
 
 import pytest
 
@@ -101,6 +102,45 @@ async def test_find_works_without_rerank_config(monkeypatch) -> None:
     assert captured["scope_dsl"] == {"category": "doc"}
     assert captured["level"] is None
     fs._ensure_access.assert_called_once_with("viking://resources/docs", request_ctx)
+
+
+@pytest.mark.asyncio
+async def test_find_leaves_target_directories_empty_when_target_uri_is_implicit(
+    monkeypatch,
+) -> None:
+    fs = _make_viking_fs()
+    captured = {}
+
+    class FakeRetriever:
+        def __init__(self, storage, embedder, rerank_config, retrieval_config):
+            pass
+
+        async def retrieve(
+            self,
+            typed_query,
+            ctx,
+            limit,
+            score_threshold,
+            scope_dsl,
+            level,
+        ):
+            captured["typed_query"] = typed_query
+            return QueryResult(
+                query=typed_query,
+                matched_contexts=[],
+                searched_directories=[],
+            )
+
+    monkeypatch.setattr(
+        "openviking.retrieve.hierarchical_retriever.HierarchicalRetriever",
+        FakeRetriever,
+    )
+
+    result = await fs.find("steam")
+
+    assert result.total == 0
+    assert captured["typed_query"].target_directories == []
+    assert call("viking://resources", None) in fs._ensure_access.call_args_list
 
 
 @pytest.mark.asyncio

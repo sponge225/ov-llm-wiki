@@ -7,7 +7,13 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-from openviking.core.namespace import NamespaceShapeError, canonicalize_uri, context_type_for_uri
+from openviking.core.context import Context, ContextLevel, Vectorize
+from openviking.core.namespace import (
+    NamespaceShapeError,
+    canonicalize_uri,
+    context_type_for_uri,
+    uri_parts,
+)
 from openviking.resource.watch_storage import is_watch_task_control_uri
 from openviking.server.identity import RequestContext
 from openviking.session.memory.memory_updater import MemoryUpdater
@@ -18,6 +24,7 @@ from openviking.session.memory.utils.resource_refs import (
 )
 from openviking.storage.errors import ResourceBusyError
 from openviking.storage.queuefs import SemanticMsg, get_queue_manager
+from openviking.storage.queuefs.embedding_msg_converter import EmbeddingMsgConverter
 from openviking.storage.queuefs.semantic_msg import build_semantic_coalesce_key
 from openviking.storage.transaction import get_lock_manager
 from openviking.storage.viking_fs import VikingFS
@@ -41,7 +48,7 @@ if TYPE_CHECKING:
 
 _DERIVED_FILENAMES = frozenset({".abstract.md", ".overview.md", ".relations.json"})
 _CREATE_ALLOWED_EXTENSIONS = frozenset(
-    {".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".py", ".js", ".ts"}
+    {".md", ".txt", ".json", ".jsonl", ".yaml", ".yml", ".toml", ".py", ".js", ".ts"}
 )
 
 
@@ -272,6 +279,40 @@ class ContentWriteCoordinator:
                 lock_handle=handle,
             )
             content_written = True
+            if self._should_skip_semantic_refresh(root_uri):
+                queue_status = None
+                vector_status = await self._maybe_enqueue_wiki_document_embedding(
+                    uri=uri,
+                    content=content,
+                    ctx=ctx,
+                    telemetry_id=telemetry_id,
+                )
+                await lock_manager.release(handle)
+                lock_released = True
+                if vector_status == "queued" and wait:
+                    queue_status = (
+                        await self._wait_for_request(
+                            telemetry_id=telemetry_id,
+                            timeout=timeout,
+                        )
+                        if telemetry_id
+                        else await self._wait_for_queues(timeout=timeout)
+                    )
+                    _, vector_status = self._refresh_statuses(
+                        wait=True,
+                        queue_status=queue_status,
+                    )
+                return self._build_write_result(
+                    uri=uri,
+                    root_uri=root_uri,
+                    context_type=context_type,
+                    mode=mode,
+                    written_bytes=written_bytes,
+                    wait=wait,
+                    queue_status=queue_status,
+                    semantic_status="skipped",
+                    vector_status=vector_status,
+                )
             await self._enqueue_semantic_refresh(
                 root_uri=root_uri,
                 changed_uri=uri,
@@ -351,7 +392,7 @@ class ContentWriteCoordinator:
             raise InvalidArgumentError(f"cannot write watch task control file directly: {uri}")
 
         parsed = VikingURI(uri)
-        if parsed.scope not in {"resources", "user", "agent"}:
+        if parsed.scope not in {"resources", "wiki", "user", "agent"}:
             raise InvalidArgumentError(f"write is not supported for scope: {parsed.scope}")
 
     def _is_not_found(self, exc: Exception) -> bool:
@@ -384,6 +425,75 @@ class ContentWriteCoordinator:
         _, ext = os.path.splitext(uri)
         if ext.lower() not in _CREATE_ALLOWED_EXTENSIONS:
             raise InvalidArgumentError(f"create mode does not allow extension '{ext}': {uri}")
+
+    def _should_skip_semantic_refresh(self, root_uri: str) -> bool:
+        return VikingURI(root_uri).scope == "wiki"
+
+    def _is_wiki_node_document_uri(self, uri: str) -> bool:
+        parts = uri_parts(uri)
+        return (
+            len(parts) == 5
+            and parts[0] == "wiki"
+            and parts[1] == "nodes"
+            and parts[3] == "documents"
+            and parts[4].endswith(".md")
+        )
+
+    async def _maybe_enqueue_wiki_document_embedding(
+        self,
+        *,
+        uri: str,
+        content: str,
+        ctx: RequestContext,
+        telemetry_id: str,
+    ) -> str:
+        if not self._is_wiki_node_document_uri(uri):
+            return "skipped"
+        if not self._vikingdb:
+            logger.warning(
+                "Wiki document embedding skipped because vikingdb is not initialized: %s",
+                uri,
+            )
+            return "skipped"
+
+        parent = VikingURI(uri).parent
+        parent_uri = parent.uri if parent is not None else None
+        context = Context(
+            uri=uri,
+            parent_uri=parent_uri,
+            is_leaf=True,
+            abstract=content,
+            context_type="resource",
+            category="wiki",
+            level=ContextLevel.DETAIL,
+            user=ctx.user,
+            account_id=ctx.account_id,
+            meta={"asset_type": "wiki_node_document"},
+        )
+        context.set_vectorize(Vectorize(text=content, full_text=content))
+        embedding_msg = EmbeddingMsgConverter.from_context(context)
+        if not embedding_msg:
+            return "skipped"
+        embedding_msg.context_data["type"] = "wiki_node_document"
+        tracker = get_request_wait_tracker()
+        if telemetry_id:
+            tracker.register_embedding_root(telemetry_id, embedding_msg.id)
+        try:
+            enqueued = await self._vikingdb.enqueue_embedding_msg(embedding_msg)
+        except Exception as exc:
+            if telemetry_id:
+                tracker.mark_embedding_failed(telemetry_id, embedding_msg.id, str(exc))
+            logger.error("Failed to enqueue wiki document embedding for %s", uri, exc_info=True)
+            return "failed"
+        if not enqueued:
+            if telemetry_id:
+                tracker.mark_embedding_failed(
+                    telemetry_id,
+                    embedding_msg.id,
+                    "embedding queue rejected wiki document",
+                )
+            return "failed"
+        return "queued"
 
     async def _create_and_write(
         self,

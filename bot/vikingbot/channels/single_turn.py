@@ -4,6 +4,7 @@
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,7 @@ class SingleTurnChannel(BaseChannel):
         session_id: str = "default",
         markdown: bool = True,
         eval: bool = False,
+        output_file: Path | None = None,
         sender: str | None = None,
     ):
         super().__init__(config, bus, workspace_path)
@@ -55,6 +57,7 @@ class SingleTurnChannel(BaseChannel):
         self._response_received = asyncio.Event()
         self._last_response: str | None = None
         self._eval = eval
+        self.output_file = output_file
 
     async def start(self) -> None:
         """Start the single-turn channel - send message and wait for response."""
@@ -85,6 +88,16 @@ class SingleTurnChannel(BaseChannel):
         try:
             await asyncio.wait_for(self._response_received.wait(), timeout=3000.0)
             if self._last_response:
+                if self._eval:
+                    if self.output_file:
+                        self.output_file.parent.mkdir(parents=True, exist_ok=True)
+                        self.output_file.write_text(self._last_response, encoding="utf-8")
+                    else:
+                        sys.stdout.write(self._last_response)
+                        sys.stdout.write("\n")
+                        sys.stdout.flush()
+                    return
+
                 from rich.markdown import Markdown
                 from rich.text import Text
 
@@ -104,13 +117,13 @@ class SingleTurnChannel(BaseChannel):
         """Send a message - store final response for later retrieval."""
         if msg.is_normal_message:
             if self._eval:
-                content = msg.content.replace('"', "'") if msg.content else ""
                 output = {
-                    "text": content,
+                    "text": msg.content or "",
                     "token_usage": msg.token_usage,
                     "time_cost": msg.time_cost,
                     "iteration": msg.iteration,
                     "tools_used_names": msg.tools_used_names,
+                    "trace": msg.metadata.get("trace_messages", []),
                 }
                 msg.content = json.dumps(output, ensure_ascii=False)
             self._last_response = msg.content

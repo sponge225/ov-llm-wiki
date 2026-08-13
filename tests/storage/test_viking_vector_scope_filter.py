@@ -40,6 +40,17 @@ def _tenant_filter(ctx: RequestContext):
     return VikingVectorIndexBackend._tenant_filter(ctx, context_type="resource")
 
 
+def _path_scopes(uri: str, *, depth: int = -1) -> list[PathScope]:
+    canonical = "viking://" + uri.removeprefix("viking://").strip("/")
+    index_path = "/" + canonical.removeprefix("viking://").strip("/")
+    if canonical == index_path:
+        return [PathScope("uri", canonical, depth=depth)]
+    return [
+        PathScope("uri", canonical, depth=depth),
+        PathScope("uri", index_path, depth=depth),
+    ]
+
+
 def test_descendant_target_elides_only_visible_root_path_filter():
     ctx = _ctx()
     target = "viking://resources/wiki/physics"
@@ -55,7 +66,7 @@ def test_descendant_target_elides_only_visible_root_path_filter():
         [
             Eq("context_type", "resource"),
             Eq("account_id", "acct"),
-            Or([PathScope("uri", target, depth=-1)]),
+            Or(_path_scopes(target)),
             Eq("status", "ready"),
             In("level", [2]),
         ]
@@ -71,7 +82,7 @@ def test_equal_visible_root_elides_only_visible_root_path_filter():
         [
             Eq("context_type", "resource"),
             Eq("account_id", "acct"),
-            Or([PathScope("uri", "viking://resources", depth=-1)]),
+            Or(_path_scopes("viking://resources")),
         ]
     )
 
@@ -91,11 +102,9 @@ def test_all_targets_may_be_under_different_visible_roots():
             Eq("context_type", "resource"),
             Eq("account_id", "acct"),
             Or(
-                [
-                    PathScope("uri", "viking://resources/wiki/physics", depth=-1),
-                    PathScope("uri", "viking://user/alice/resources/private-notes", depth=-1),
-                    PathScope("uri", "viking://agent/skills/research", depth=-1),
-                ]
+                _path_scopes("viking://resources/wiki/physics")
+                + _path_scopes("viking://user/alice/resources/private-notes")
+                + _path_scopes("viking://agent/skills/research")
             ),
         ]
     )
@@ -111,7 +120,7 @@ def test_mixed_visible_and_outside_targets_keep_original_tenant_filter():
         [
             Eq("context_type", "resource"),
             _tenant_filter(ctx),
-            Or([PathScope("uri", target, depth=-1) for target in targets]),
+            Or([scope for target in targets for scope in _path_scopes(target)]),
         ]
     )
 
@@ -179,7 +188,7 @@ async def test_cross_user_targets_cannot_bypass_visible_roots_in_tenant_search()
             [
                 Eq("context_type", "resource"),
                 _tenant_filter(ctx),
-                Or([PathScope("uri", cross_user_uri, depth=-1)]),
+                Or(_path_scopes(cross_user_uri)),
             ]
         ),
         And(
@@ -187,10 +196,8 @@ async def test_cross_user_targets_cannot_bypass_visible_roots_in_tenant_search()
                 Eq("context_type", "resource"),
                 _tenant_filter(ctx),
                 Or(
-                    [
-                        PathScope("uri", own_uri, depth=-1),
-                        PathScope("uri", cross_user_uri, depth=-1),
-                    ]
+                    _path_scopes(own_uri)
+                    + _path_scopes(cross_user_uri)
                 ),
             ]
         ),
@@ -207,14 +214,14 @@ def test_segment_prefix_and_visible_root_ancestor_do_not_elide_tenant_filter():
         [
             Eq("context_type", "resource"),
             _tenant_filter(ctx),
-            Or([PathScope("uri", "viking://resources-other/wiki", depth=-1)]),
+            Or(_path_scopes("viking://resources-other/wiki")),
         ]
     )
     assert ancestor == And(
         [
             Eq("context_type", "resource"),
             _tenant_filter(ctx),
-            Or([PathScope("uri", "viking://agent", depth=-1)]),
+            Or(_path_scopes("viking://agent")),
         ]
     )
 
@@ -237,7 +244,7 @@ def test_root_role_keeps_existing_target_only_behavior():
     assert _build(ctx, [target]) == And(
         [
             Eq("context_type", "resource"),
-            Or([PathScope("uri", target, depth=-1)]),
+            Or(_path_scopes(target)),
         ]
     )
 
@@ -252,6 +259,20 @@ def test_actor_peer_target_retains_account_and_exact_target_scope():
         [
             Eq("context_type", "resource"),
             Eq("account_id", "acct"),
-            Or([PathScope("uri", target, depth=-1)]),
+            Or(_path_scopes(target)),
+        ]
+    )
+
+
+def test_wiki_target_matches_canonical_and_index_path_records():
+    ctx = _ctx()
+
+    result = _build(ctx, ["viking://wiki/nodes"])
+
+    assert result == And(
+        [
+            Eq("context_type", "resource"),
+            Eq("account_id", "acct"),
+            Or(_path_scopes("viking://wiki/nodes")),
         ]
     )

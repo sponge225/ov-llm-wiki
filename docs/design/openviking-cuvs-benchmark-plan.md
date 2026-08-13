@@ -59,7 +59,7 @@ OpenViking 仓库已经包含多类 benchmark，它们可以作为 cuVS 集成�
 | --- | --- | --- |
 | `benchmark/locomo/` | 长期对话记忆、跨 session QA | memory quality 回归；比较 local exact、cuVS exact、CAGRA |
 | `benchmark/longmemeval/openviking/` | 信息提取、多 session/时间推理、更新与拒答 | 首选的长期记忆质量 benchmark |
-| `benchmark/RAG/` | LoCoMo、Qasper、FinanceBench、SyllabusQA | 检查通用 RAG 质量和领域差异 |
+| `benchmark/wiki/` | LoCoMo、Qasper、FinanceBench、SyllabusQA | 检查 Wiki QA 质量和领域差异 |
 | `benchmark/tau2/llm/` | memory 对 agent tool-task success 的贡献 | 端到端任务收益，不用于隔离 vector-search 性能 |
 | `benchmark/custom/session_contention_benchmark.py` | Server 混合负载的 QPS、延迟、错误率和积压 | 扩展为 `local`/`cuvs` backend matrix，测真实服务退化 |
 

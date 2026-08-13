@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0
 """Tests for file-system service coordination behavior."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -13,10 +14,12 @@ from openviking_cli.session.user_id import UserIdentifier
 
 
 class _FakeVikingFS:
-    def __init__(self, *, rm_error=None):
+    def __init__(self, *, rm_error=None, read_files=None):
         self.rm_calls = []
         self.mv_calls = []
+        self.grep_calls = []
         self.rm_error = rm_error
+        self.read_files = read_files or {}
 
     async def rm(self, uri, recursive=False, ctx=None):
         self.rm_calls.append({"uri": uri, "recursive": recursive, "ctx": ctx})
@@ -26,6 +29,48 @@ class _FakeVikingFS:
 
     async def mv(self, from_uri, to_uri, ctx=None):
         self.mv_calls.append({"from_uri": from_uri, "to_uri": to_uri, "ctx": ctx})
+
+    async def read_file(self, uri, ctx=None):
+        return self.read_files[uri]
+
+    async def grep(
+        self,
+        uri,
+        pattern,
+        exclude_uri=None,
+        case_insensitive=False,
+        node_limit=None,
+        level_limit=10,
+        ctx=None,
+    ):
+        self.grep_calls.append(
+            {
+                "uri": uri,
+                "pattern": pattern,
+                "exclude_uri": exclude_uri,
+                "case_insensitive": case_insensitive,
+                "node_limit": node_limit,
+                "level_limit": level_limit,
+                "ctx": ctx,
+            }
+        )
+        return {
+            "matches": [
+                {
+                    "uri": f"{uri.rstrip('/')}/0001.md",
+                    "line": 1,
+                    "content": "steam match",
+                },
+                {
+                    "uri": uri.replace("/documents/", "/evidence.jsonl"),
+                    "line": 2,
+                    "content": "auxiliary match",
+                },
+            ],
+            "count": 2,
+            "match_count": 2,
+            "files_scanned": 2,
+        }
 
 
 class _FakeWatchManager:
@@ -138,6 +183,148 @@ def request_context():
         user=UserIdentifier("default", "ryoma"),
         role=Role.USER,
     )
+
+
+@pytest.mark.asyncio
+async def test_grep_wiki_node_expands_to_node_subtree_documents(request_context):
+    nodes_json = json.dumps(
+        {
+            "nodes": [
+                {
+                    "node_id": "steam",
+                    "parent_node_id": None,
+                    "child_node_ids": ["steam_workshop"],
+                },
+                {
+                    "node_id": "steam_workshop",
+                    "parent_node_id": "steam",
+                    "child_node_ids": [],
+                },
+                {
+                    "node_id": "steam_security",
+                    "parent_node_id": None,
+                    "child_node_ids": [],
+                },
+            ]
+        }
+    )
+    viking_fs = _FakeVikingFS(read_files={"viking://wiki/nodes.json": nodes_json})
+    service = FSService(viking_fs=viking_fs)
+
+    result = await service.grep(
+        "viking://wiki/nodes/steam",
+        "steam",
+        ctx=request_context,
+        case_insensitive=True,
+    )
+
+    assert [call["uri"] for call in viking_fs.grep_calls] == [
+        "viking://wiki/nodes/steam/documents/",
+        "viking://wiki/nodes/steam_workshop/documents/",
+    ]
+    assert all(call["case_insensitive"] for call in viking_fs.grep_calls)
+    assert [match["uri"] for match in result["matches"]] == [
+        "viking://wiki/nodes/steam/documents/0001.md",
+        "viking://wiki/nodes/steam_workshop/documents/0001.md",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_grep_wiki_nodes_root_expands_to_all_node_documents(request_context):
+    nodes_json = json.dumps(
+        {
+            "nodes": [
+                {"node_id": "steam", "parent_node_id": None, "child_node_ids": []},
+                {"node_id": "steam_security", "parent_node_id": None, "child_node_ids": []},
+            ]
+        }
+    )
+    viking_fs = _FakeVikingFS(read_files={"viking://wiki/nodes.json": nodes_json})
+    service = FSService(viking_fs=viking_fs)
+
+    await service.grep("viking://wiki/nodes", "steam", ctx=request_context, node_limit=1)
+
+    assert [call["uri"] for call in viking_fs.grep_calls] == [
+        "viking://wiki/nodes/steam/documents/",
+    ]
+    assert viking_fs.grep_calls[0]["node_limit"] == 1
+
+
+@pytest.mark.asyncio
+async def test_ls_wiki_nodes_root_lists_logical_root_nodes(request_context):
+    nodes_json = json.dumps(
+        {
+            "nodes": [
+                {
+                    "node_id": "steam",
+                    "title": "Steam",
+                    "parent_node_id": None,
+                    "child_node_ids": ["steam_workshop"],
+                },
+                {
+                    "node_id": "steam_workshop",
+                    "title": "Steam Workshop",
+                    "parent_node_id": "steam",
+                    "child_node_ids": [],
+                },
+                {
+                    "node_id": "steam_security",
+                    "title": "Steam Security",
+                    "parent_node_id": None,
+                    "child_node_ids": [],
+                },
+            ]
+        }
+    )
+    viking_fs = _FakeVikingFS(read_files={"viking://wiki/nodes.json": nodes_json})
+    service = FSService(viking_fs=viking_fs)
+
+    result = await service.ls("viking://wiki/nodes", ctx=request_context, simple=True)
+
+    assert result == [
+        "viking://wiki/nodes/steam",
+        "viking://wiki/nodes/steam_security",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_ls_wiki_node_lists_documents_and_child_nodes(request_context):
+    nodes_json = json.dumps(
+        {
+            "nodes": [
+                {
+                    "node_id": "steam",
+                    "title": "Steam",
+                    "parent_node_id": None,
+                    "child_node_ids": ["steam_workshop"],
+                },
+                {
+                    "node_id": "steam_workshop",
+                    "title": "Steam Workshop",
+                    "parent_node_id": "steam",
+                    "child_node_ids": [],
+                },
+                {
+                    "node_id": "steam_security",
+                    "title": "Steam Security",
+                    "parent_node_id": None,
+                    "child_node_ids": [],
+                },
+            ]
+        }
+    )
+    viking_fs = _FakeVikingFS(read_files={"viking://wiki/nodes.json": nodes_json})
+    service = FSService(viking_fs=viking_fs)
+
+    result = await service.ls("viking://wiki/nodes/steam", ctx=request_context)
+
+    assert [entry["uri"] for entry in result] == [
+        "viking://wiki/nodes/steam/documents",
+        "viking://wiki/nodes/steam_workshop",
+    ]
+    assert all(entry["isDir"] for entry in result)
+    assert "evidence.jsonl" not in {entry["name"] for entry in result}
+    assert "sources" not in {entry["name"] for entry in result}
 
 
 @pytest.mark.asyncio

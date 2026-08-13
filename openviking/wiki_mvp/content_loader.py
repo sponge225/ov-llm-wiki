@@ -1,0 +1,276 @@
+"""Bounded resource content loading for Wiki document card generation."""
+
+from __future__ import annotations
+
+from enum import Enum
+from typing import TYPE_CHECKING, Any
+
+from openviking_cli.utils.uri import VikingURI
+
+from .schemas import CardInputPayload, ResourceDocument, WikiResourceInput
+
+if TYPE_CHECKING:
+    from openviking.server.identity import RequestContext
+    from openviking.storage import VikingDBManager
+    from openviking.storage.viking_fs import VikingFS
+
+LS_ALL_NODES = 2**31 - 1
+
+
+class WikiCardInputMode(str, Enum):
+    SUMMARY = "summary"
+    RAW_CHUNK = "raw_chunk"
+
+
+class WikiContentLoader:
+    """Load bounded card input from a finalized resource directory."""
+
+    def __init__(
+        self,
+        viking_fs: "VikingFS",
+        vikingdb: "VikingDBManager",
+        ctx: "RequestContext",
+    ):
+        self.viking_fs = viking_fs
+        self.vikingdb = vikingdb
+        self.ctx = ctx
+        self._overview_cache: dict[str, dict[str, str]] = {}
+
+    async def load_document(
+        self,
+        doc: WikiResourceInput,
+        *,
+        mode: WikiCardInputMode | str,
+        max_card_input_chars: int,
+    ) -> ResourceDocument:
+        payload = await self.load_for_card(
+            doc,
+            mode=mode,
+            max_card_input_chars=max_card_input_chars,
+        )
+        return ResourceDocument(
+            doc_id=doc.doc_id,
+            resource_uri=doc.resource_uri,
+            title=doc.title,
+            source_type=doc.source_type,
+            summary=doc.summary,
+            abstract=doc.abstract,
+            content_or_structure=payload.content,
+            metadata={
+                **doc.metadata,
+                "card_input_mode": str(mode),
+                "missing_summary_uris": payload.missing_summary_uris,
+            },
+        )
+
+    async def load_for_card(
+        self,
+        doc: WikiResourceInput,
+        *,
+        mode: WikiCardInputMode | str,
+        max_card_input_chars: int,
+    ) -> CardInputPayload:
+        input_mode = WikiCardInputMode(mode)
+        root_uri = doc.document_dir_uri or doc.resource_uri
+        entries = await self._collect_entries(root_uri, mode=input_mode)
+        missing = [entry["uri"] for entry in entries if entry.get("missing_summary")]
+        if input_mode == WikiCardInputMode.SUMMARY and entries:
+            usable_entries = [entry for entry in entries if not entry.get("missing_summary")]
+            if not usable_entries:
+                raise RuntimeError(
+                    f"summary mode found no semantic abstracts under {root_uri}; "
+                    "rerun after semantic generation succeeds or use raw_chunk mode"
+                )
+        content = self._render_entries(entries, max_chars=max_card_input_chars)
+        return CardInputPayload(content=content, missing_summary_uris=missing)
+
+    async def _collect_entries(
+        self,
+        root_uri: str,
+        *,
+        mode: WikiCardInputMode,
+    ) -> list[dict[str, Any]]:
+        entries: list[dict[str, Any]] = []
+
+        async def visit(uri: str, title_path: list[str]) -> None:
+            if await self._is_directory(uri):
+                abstract = await self._safe_abstract(uri)
+                overview = await self._safe_overview(uri)
+                if abstract or overview:
+                    entries.append(
+                        {
+                            "kind": "directory",
+                            "uri": uri,
+                            "title_path": list(title_path),
+                            "text": overview or abstract,
+                        }
+                    )
+                for child in await self._list_children(uri):
+                    name = str(child.get("name") or "").strip()
+                    if not name or name in {".", ".."}:
+                        continue
+                    if name.startswith("."):
+                        continue
+                    child_uri = str(child.get("uri") or f"{uri.rstrip('/')}/{name}")
+                    if self._is_hidden_semantic_file(child_uri):
+                        continue
+                    if self._entry_is_dir(child):
+                        await visit(child_uri, [*title_path, name])
+                    else:
+                        await self._append_leaf(entries, child_uri, [*title_path, name], mode)
+                return
+
+            await self._append_leaf(entries, uri, title_path or [uri.rsplit("/", 1)[-1]], mode)
+
+        await visit(root_uri, [root_uri.rstrip("/").rsplit("/", 1)[-1]])
+        return entries
+
+    async def _append_leaf(
+        self,
+        entries: list[dict[str, Any]],
+        uri: str,
+        title_path: list[str],
+        mode: WikiCardInputMode,
+    ) -> None:
+        if self._is_hidden_semantic_file(uri):
+            return
+        if mode == WikiCardInputMode.RAW_CHUNK:
+            text = await self._safe_read(uri)
+            if not text:
+                return
+            entries.append(
+                {"kind": "leaf_raw", "uri": uri, "title_path": title_path, "text": text}
+            )
+            return
+
+        text = await self._leaf_abstract(uri)
+        missing = not bool(text)
+        if missing:
+            text = "[summary missing]"
+        entries.append(
+            {
+                "kind": "leaf_summary",
+                "uri": uri,
+                "title_path": title_path,
+                "text": text,
+                "missing_summary": missing,
+            }
+        )
+
+    async def _leaf_abstract(self, uri: str) -> str:
+        records = await self.vikingdb.get_context_by_uri(
+            uri=uri,
+            level=2,
+            limit=1,
+            ctx=self.ctx,
+        )
+        if records:
+            abstract = str(records[0].get("abstract") or "").strip()
+            if abstract:
+                return abstract
+        parent_uri = VikingURI(uri).parent.uri
+        file_name = uri.rsplit("/", 1)[-1]
+        parsed = await self._parsed_parent_overview(parent_uri)
+        return parsed.get(file_name, "").strip()
+
+    async def _parsed_parent_overview(self, parent_uri: str) -> dict[str, str]:
+        if parent_uri in self._overview_cache:
+            return self._overview_cache[parent_uri]
+        overview = await self._safe_read(f"{parent_uri}/.overview.md")
+        parsed: dict[str, str] = {}
+        current_name: str | None = None
+        current_lines: list[str] = []
+        for line in overview.splitlines():
+            if line.startswith("### "):
+                if current_name is not None:
+                    parsed[current_name] = "\n".join(current_lines).strip()
+                current_name = line[4:].strip().split()[0]
+                current_lines = []
+                continue
+            if current_name is not None:
+                current_lines.append(line)
+        if current_name is not None:
+            parsed[current_name] = "\n".join(current_lines).strip()
+        self._overview_cache[parent_uri] = parsed
+        return parsed
+
+    def _render_entries(self, entries: list[dict[str, Any]], *, max_chars: int) -> str:
+        if not entries:
+            return ""
+        max_chars = max(1000, int(max_chars or 20000))
+        rendered = [self._render_entry(entry) for entry in entries]
+        joined = "\n\n".join(rendered)
+        if len(joined) <= max_chars:
+            return joined
+
+        per_entry_budget = max(160, max_chars // max(1, len(rendered)))
+        compacted = [self._clip(text, per_entry_budget) for text in rendered]
+        joined = "\n\n".join(compacted)
+        if len(joined) <= max_chars:
+            return joined
+
+        # Preserve coverage over all entries instead of dropping tail entries.
+        per_entry_budget = max(80, (max_chars - len(rendered) * 2) // max(1, len(rendered)))
+        return "\n\n".join(self._clip(text, per_entry_budget) for text in rendered)
+
+    @staticmethod
+    def _render_entry(entry: dict[str, Any]) -> str:
+        title = " / ".join(str(part) for part in entry.get("title_path") or [])
+        return (
+            f"URI: {entry.get('uri', '')}\n"
+            f"Type: {entry.get('kind', '')}\n"
+            f"Title Path: {title}\n"
+            f"Content:\n{entry.get('text', '')}"
+        ).strip()
+
+    @staticmethod
+    def _clip(text: str, max_chars: int) -> str:
+        if len(text) <= max_chars:
+            return text
+        if max_chars <= 20:
+            return text[:max_chars]
+        return text[: max_chars - 20].rstrip() + "\n...(truncated)"
+
+    async def _is_directory(self, uri: str) -> bool:
+        try:
+            stat = await self.viking_fs.stat(uri, ctx=self.ctx)
+        except Exception:
+            return False
+        return bool(isinstance(stat, dict) and stat.get("isDir"))
+
+    async def _list_children(self, uri: str) -> list[dict[str, Any]]:
+        try:
+            return await self.viking_fs.ls(
+                uri,
+                show_all_hidden=True,
+                node_limit=LS_ALL_NODES,
+                ctx=self.ctx,
+            )
+        except Exception:
+            return []
+
+    async def _safe_abstract(self, uri: str) -> str:
+        try:
+            return str(await self.viking_fs.abstract(uri, ctx=self.ctx) or "").strip()
+        except Exception:
+            return ""
+
+    async def _safe_overview(self, uri: str) -> str:
+        try:
+            return str(await self.viking_fs.overview(uri, ctx=self.ctx) or "").strip()
+        except Exception:
+            return ""
+
+    async def _safe_read(self, uri: str) -> str:
+        try:
+            return str(await self.viking_fs.read_file(uri, ctx=self.ctx) or "").strip()
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _entry_is_dir(entry: dict[str, Any]) -> bool:
+        return bool(entry.get("isDir", False)) or entry.get("type") == "directory"
+
+    @staticmethod
+    def _is_hidden_semantic_file(uri: str) -> bool:
+        return uri.endswith("/.abstract.md") or uri.endswith("/.overview.md")
