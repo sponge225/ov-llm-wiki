@@ -1,7 +1,13 @@
 import pytest
 from pydantic import ValidationError
 
-from openviking.wiki_mvp.schemas import DocumentCard, EvidenceAnchor, WikiNode
+from openviking.wiki_mvp.schemas import (
+    DocumentCard,
+    EvidenceAnchor,
+    WikiBottomNodeDiscoveryResponse,
+    WikiNode,
+    WikiParentNodeDiscoveryResponse,
+)
 
 
 def test_document_card_requires_candidate_topics():
@@ -18,19 +24,40 @@ def test_document_card_requires_candidate_topics():
         )
 
 
-def test_active_node_requires_inclusion_and_exclusion_criteria():
+@pytest.mark.parametrize(
+    "schema,payload",
+    [
+        (
+            WikiBottomNodeDiscoveryResponse,
+            {
+                "nodes": [
+                    {
+                        "node_id": "question_answering",
+                        "title": "Question Answering",
+                        "scope": "QA papers",
+                        "supporting_doc_ids": ["doc_1"],
+                    }
+                ]
+            },
+        ),
+        (
+            WikiParentNodeDiscoveryResponse,
+            {
+                "nodes": [
+                    {
+                        "node_id": "question_answering",
+                        "title": "Question Answering",
+                        "scope": "QA papers",
+                        "supporting_child_titles": ["Child Topic"],
+                    }
+                ]
+            },
+        ),
+    ],
+)
+def test_node_discovery_rejects_internal_node_fields(schema, payload):
     with pytest.raises(ValidationError):
-        WikiNode(
-            node_id="question_answering",
-            title="Question Answering",
-            status="active",
-            depth=1,
-            scope="QA papers",
-            seed_doc_ids=["OARW_1", "OARW_2", "OARW_3"],
-            supporting_doc_count=3,
-            promotion_decision="promote_to_node",
-            promotion_reasons=["supported by multiple docs"],
-        )
+        schema.model_validate(payload)
 
 
 def test_node_id_must_be_snake_case():
@@ -38,11 +65,6 @@ def test_node_id_must_be_snake_case():
         WikiNode(
             node_id="Question Answering",
             title="Question Answering",
-            status="rejected",
             depth=1,
             scope="QA papers",
-            seed_doc_ids=["OARW_1"],
-            supporting_doc_count=1,
-            promotion_decision="reject",
-            promotion_reasons=["single doc"],
         )

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from openviking_cli.utils.uri import VikingURI
 
-from .schemas import CardInputPayload, ResourceDocument, WikiResourceInput
+from .schemas import ResourceDocument, WikiResourceInput
 
 if TYPE_CHECKING:
     from openviking.server.identity import RequestContext
@@ -43,33 +43,6 @@ class WikiContentLoader:
         mode: WikiCardInputMode | str,
         max_card_input_chars: int,
     ) -> ResourceDocument:
-        payload = await self.load_for_card(
-            doc,
-            mode=mode,
-            max_card_input_chars=max_card_input_chars,
-        )
-        return ResourceDocument(
-            doc_id=doc.doc_id,
-            resource_uri=doc.resource_uri,
-            title=doc.title,
-            source_type=doc.source_type,
-            summary=doc.summary,
-            abstract=doc.abstract,
-            content_or_structure=payload.content,
-            metadata={
-                **doc.metadata,
-                "card_input_mode": str(mode),
-                "missing_summary_uris": payload.missing_summary_uris,
-            },
-        )
-
-    async def load_for_card(
-        self,
-        doc: WikiResourceInput,
-        *,
-        mode: WikiCardInputMode | str,
-        max_card_input_chars: int,
-    ) -> CardInputPayload:
         input_mode = WikiCardInputMode(mode)
         root_uri = doc.document_dir_uri or doc.resource_uri
         entries = await self._collect_entries(root_uri, mode=input_mode)
@@ -82,7 +55,20 @@ class WikiContentLoader:
                     "rerun after semantic generation succeeds or use raw_chunk mode"
                 )
         content = self._render_entries(entries, max_chars=max_card_input_chars)
-        return CardInputPayload(content=content, missing_summary_uris=missing)
+        return ResourceDocument(
+            doc_id=doc.doc_id,
+            resource_uri=doc.resource_uri,
+            title=doc.title,
+            source_type=doc.source_type,
+            summary=doc.summary,
+            abstract=doc.abstract,
+            content_or_structure=content,
+            metadata={
+                **doc.metadata,
+                "card_input_mode": input_mode.value,
+                "missing_summary_uris": missing,
+            },
+        )
 
     async def _collect_entries(
         self,

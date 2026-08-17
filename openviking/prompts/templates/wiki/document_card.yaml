@@ -1,0 +1,32 @@
+metadata:
+  id: "wiki.document_card"
+  name: "Wiki Document Card"
+  description: "Generate one Wiki Document Card from a resource document"
+  version: "1.0.0"
+  language: "en"
+  category: "wiki"
+
+variables:
+  - name: "boundary"
+    type: "string"
+    description: "Wiki MVP data boundary instruction"
+    required: true
+  - name: "input_json"
+    type: "string"
+    description: "JSON encoded resource document"
+    required: true
+
+template: |
+  Generate one Wiki Document Card for the given resource document.
+
+  {{ boundary }}
+
+  The input contains source_abstract, content_or_structure, and metadata. Use only those fields.
+  Return only the semantic card content: summary, main_points, important_terms, limitations_or_notes, candidate_topics, and evidence_anchors.
+  Do not return doc_id, resource_uri, title, source_type, markdown, node fields, or source assignment fields.
+
+  Input:
+  {{ input_json }}
+
+llm_config:
+  temperature: 0.0

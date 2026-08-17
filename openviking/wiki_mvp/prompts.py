@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 
+from openviking.prompts.manager import PromptManager
+
 from .schemas import (
     DocumentCard,
     GeneratedNodeContext,
     ResourceDocument,
     ResourceSpaceProfile,
-    SourceRef,
     WikiNode,
 )
 
@@ -18,18 +19,21 @@ _BOUNDARY = (
     "Only use the provided resources and already generated Wiki assets."
 )
 
+_PROMPT_MANAGER = PromptManager()
+
 
 def build_document_card_prompt(doc: ResourceDocument) -> str:
-    payload = doc.model_dump(mode="json")
-    return f"""Generate one Wiki Document Card for the given resource document.
-
-{_BOUNDARY}
-
-The card must summarize only this document. It must include candidate_topics and evidence_anchors.
-
-Input:
-{_json(payload)}
-"""
+    metadata = {
+        key: value
+        for key, value in (doc.metadata or {}).items()
+        if key in {"card_input_mode", "missing_summary_uris"}
+    }
+    payload = {
+        "source_abstract": doc.abstract,
+        "content_or_structure": doc.content_or_structure,
+        "metadata": metadata,
+    }
+    return _render_wiki_prompt("wiki.document_card", payload)
 
 
 def build_profile_prompt(cards: list[DocumentCard]) -> str:
@@ -40,165 +44,72 @@ def build_profile_prompt(cards: list[DocumentCard]) -> str:
         )
         for card in cards
     ]
-    return f"""Generate a short resource space profile from the provided Document Cards.
-
-{_BOUNDARY}
-
-Do not generate wiki nodes. Do not include the full resource list.
-
-Input:
-{_json(payload)}
-"""
+    return _render_wiki_prompt("wiki.resource_profile", payload)
 
 
-def build_node_discovery_prompt(
-    profile: ResourceSpaceProfile,
-    cards: list[DocumentCard] | None = None,
-    child_nodes: list[GeneratedNodeContext] | None = None,
-    depth: int = 1,
-    min_child_nodes_per_parent: int = 3,
-) -> str:
-    if child_nodes:
-        inputs = {
-            "profile": profile.model_dump(mode="json"),
-            "depth": depth,
-            "child_nodes": [_child_node_payload(context) for context in child_nodes],
-        }
-    else:
-        inputs = {
-            "profile": profile.model_dump(mode="json"),
-            "depth": depth,
-            "cards": [
-                card.model_dump(
-                    include={
-                        "doc_id",
-                        "title",
-                        "summary",
-                        "main_points",
-                        "important_terms",
-                        "candidate_topics",
-                    },
-                    mode="json",
-                )
-                for card in cards or []
-            ],
-        }
-    return f"""Generate current-layer wiki candidate nodes and decide which ones become active nodes.
-
-{_BOUNDARY}
-
-This step handles only the current layer. Do not build the full hierarchy in one call.
-Active nodes must have enough support, clear boundary, and synthesis value.
-For parent layers, candidate child nodes may come from any lower depth. Create a parent node only when at least {min_child_nodes_per_parent} clearly related child nodes can be grouped under it, and at least one child node is from depth-1. Do not create broader abstractions just because a more general label is possible.
-
-Input:
-{_json(inputs)}
-"""
-
-
-def build_source_assignment_prompt(
-    active_nodes: list[WikiNode],
-    cards: list[DocumentCard] | None = None,
-    child_nodes: list[GeneratedNodeContext] | None = None,
-    min_child_nodes_per_parent: int = 3,
+def build_bottom_node_discovery_prompt(
+    cards: list[DocumentCard],
+    min_refs_per_node: int,
 ) -> str:
     inputs = {
-        "nodes": [node.model_dump(mode="json") for node in active_nodes],
-        "cards": [
+        "source_unit_count": len(cards),
+        "min_refs_per_node": min_refs_per_node,
+        "topic_records": [
             card.model_dump(
-                include={"doc_id", "resource_uri", "title", "summary", "candidate_topics"},
+                include={"doc_id", "candidate_topics", "summary"},
                 mode="json",
             )
-            for card in cards or []
+            for card in cards
         ],
-        "child_nodes": [_child_node_payload(context) for context in child_nodes or []],
     }
-    return f"""Assign lower-level sources to each current-layer active node.
-
-{_BOUNDARY}
-
-Bottom-layer nodes use source documents. Parent nodes use child nodes and inherit their source refs.
-For parent nodes, assign sources through clearly related child nodes. Child nodes may mix lower depths, but each parent node must cover at least {min_child_nodes_per_parent} child nodes and include at least one child node from the previous depth.
-
-Input:
-{_json(inputs)}
-"""
+    return _render_wiki_prompt("wiki.bottom_node_discovery", inputs)
 
 
-def build_node_md_prompt(node: WikiNode, source_refs: list[SourceRef]) -> str:
+def build_parent_node_discovery_prompt(
+    child_nodes: list[GeneratedNodeContext],
+    min_child_nodes_per_parent: int,
+) -> str:
     inputs = {
-        "node": node.model_dump(mode="json"),
-        "source_refs": [ref.model_dump(mode="json") for ref in source_refs],
+        "source_unit_count": len(child_nodes),
+        "min_child_nodes_per_parent": min_child_nodes_per_parent,
+        "child_node_records": [
+            context.node.model_dump(
+                include={"title", "scope"},
+                mode="json",
+            )
+            for context in child_nodes
+        ],
     }
-    return f"""Generate node.md for this Wiki node.
+    return _render_wiki_prompt("wiki.parent_node_discovery", inputs)
 
-{_BOUNDARY}
 
-node.md is a directory explanation. It is not the synthesized knowledge body.
-
-Input:
-{_json(inputs)}
-"""
+def build_node_md_prompt(node: WikiNode) -> str:
+    inputs = {
+        "node": node.model_dump(include={"title", "scope"}, mode="json"),
+    }
+    return _render_wiki_prompt("wiki.node_md", inputs)
 
 
 def build_node_documents_prompt(
     node: WikiNode,
-    source_refs: list[SourceRef],
-    cards: list[DocumentCard] | None = None,
-    child_nodes: list[GeneratedNodeContext] | None = None,
+    source_documents: list[dict],
 ) -> str:
     inputs = {
-        "node": node.model_dump(mode="json"),
-        "source_refs": [ref.model_dump(mode="json") for ref in source_refs],
-        "cards": [
-            card.model_dump(
-                include={
-                    "doc_id",
-                    "summary",
-                    "main_points",
-                    "important_terms",
-                    "limitations_or_notes",
-                },
-                mode="json",
-            )
-            for card in cards or []
-        ],
-        "child_nodes": [_child_node_payload(context) for context in child_nodes or []],
+        "node": node.model_dump(include={"title", "scope"}, mode="json"),
+        "source_documents": source_documents,
     }
-    return f"""Generate Wiki node documents for this node.
-
-{_BOUNDARY}
-
-The output must synthesize multiple source documents or child nodes. Multiple documents are only length splits.
-
-Input:
-{_json(inputs)}
-"""
+    return _render_wiki_prompt("wiki.node_documents", inputs)
 
 
-def build_evidence_prompt(
+def build_parent_node_documents_prompt(
     node: WikiNode,
-    node_documents: list[dict],
-    source_refs: list[SourceRef],
-    cards: list[DocumentCard],
+    child_nodes: list[dict],
 ) -> str:
     inputs = {
-        "node": node.model_dump(mode="json"),
-        "node_documents": node_documents,
-        "source_refs": [ref.model_dump(mode="json") for ref in source_refs],
-        "cards": [
-            card.model_dump(include={"doc_id", "evidence_anchors"}, mode="json") for card in cards
-        ],
+        "node": node.model_dump(include={"title", "scope"}, mode="json"),
+        "child_nodes": child_nodes,
     }
-    return f"""Extract key claims from node documents and bind each claim to section/chunk-level evidence.
-
-{_BOUNDARY}
-
-For bottom-layer nodes, evidence must come from original resources. For parent nodes whose source_refs have ref_type="wiki_node", evidence must come from those child Wiki nodes, not from original documents. Do not use Document Cards as final evidence.
-
-Input:
-{_json(inputs)}
-"""
+    return _render_wiki_prompt("wiki.parent_node_documents", inputs)
 
 
 def build_next_layer_decision_prompt(
@@ -210,16 +121,11 @@ def build_next_layer_decision_prompt(
         "profile": profile.model_dump(mode="json"),
         "child_nodes": [_child_node_payload(context) for context in child_nodes],
     }
-    return f"""Decide whether the completed current layer should be aggregated upward.
-
-{_BOUNDARY}
-
-Return continue_upward=true only if multiple active nodes share a stable higher-level theme and the parent node adds organization value.
-Do not continue upward for a generic overview label. Continue only if at least {min_child_nodes_per_parent} clearly related child nodes can form a useful parent node.
-
-Input:
-{_json(inputs)}
-"""
+    return _render_wiki_prompt(
+        "wiki.next_layer_decision",
+        inputs,
+        min_child_nodes_per_parent=min_child_nodes_per_parent,
+    )
 
 
 def _child_node_payload(context: GeneratedNodeContext) -> dict:
@@ -227,9 +133,17 @@ def _child_node_payload(context: GeneratedNodeContext) -> dict:
         "node": context.node.model_dump(mode="json"),
         "node_md": context.node_md,
         "documents": [document.model_dump(mode="json") for document in context.documents],
-        "evidence": [claim.model_dump(mode="json") for claim in context.evidence],
         "source_refs": [ref.model_dump(mode="json") for ref in context.source_refs],
     }
+
+
+def _render_wiki_prompt(prompt_id: str, payload: object, **extra_vars: object) -> str:
+    variables = {
+        "boundary": _BOUNDARY,
+        "input_json": _json(payload),
+        **extra_vars,
+    }
+    return _PROMPT_MANAGER.render(prompt_id, variables)
 
 
 def _json(payload: object) -> str:

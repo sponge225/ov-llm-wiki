@@ -1,0 +1,35 @@
+metadata:
+  id: "wiki.next_layer_decision"
+  name: "Wiki Next Layer Decision"
+  description: "Decide whether to aggregate the current Wiki layer upward"
+  version: "1.0.0"
+  language: "en"
+  category: "wiki"
+
+variables:
+  - name: "boundary"
+    type: "string"
+    description: "Wiki MVP data boundary instruction"
+    required: true
+  - name: "input_json"
+    type: "string"
+    description: "JSON encoded profile and completed child nodes"
+    required: true
+  - name: "min_child_nodes_per_parent"
+    type: "int"
+    description: "Minimum child nodes required for parent-node grouping"
+    required: true
+
+template: |
+  Decide whether the completed current layer should be aggregated upward.
+
+  {{ boundary }}
+
+  Return continue_upward=true only if multiple active nodes share a stable higher-level theme and the parent node adds organization value.
+  Do not continue upward for a generic overview label. Continue only if at least {{ min_child_nodes_per_parent }} clearly related child nodes can form a useful parent node.
+
+  Input:
+  {{ input_json }}
+
+llm_config:
+  temperature: 0.0

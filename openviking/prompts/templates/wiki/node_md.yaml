@@ -1,0 +1,30 @@
+metadata:
+  id: "wiki.node_md"
+  name: "Wiki Node Markdown"
+  description: "Generate node.md for a Wiki node"
+  version: "1.0.0"
+  language: "en"
+  category: "wiki"
+
+variables:
+  - name: "boundary"
+    type: "string"
+    description: "Wiki MVP data boundary instruction"
+    required: true
+  - name: "input_json"
+    type: "string"
+    description: "JSON encoded node title and scope"
+    required: true
+
+template: |
+  Generate node.md for this Wiki node.
+
+  {{ boundary }}
+
+  node.md is a directory explanation. It is not the synthesized knowledge body.
+
+  Input:
+  {{ input_json }}
+
+llm_config:
+  temperature: 0.0

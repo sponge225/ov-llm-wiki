@@ -8,12 +8,12 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any
 
-from .assignments import SourceAssignmentRunner
+from .assignments import SourceRefBuilder
 from .cards import DocumentCardGenerator
 from .config import WikiMVPConfig
 from .content_loader import WikiCardInputMode, WikiContentLoader
 from .documents import NodeContentGenerator
-from .evidence import EvidenceRunner
+from .layer_decision import LayerDecisionRunner
 from .llm import WikiLLMRunner
 from .nodes import NodeDiscoveryRunner
 from .profile import ResourceSpaceProfiler
@@ -23,7 +23,6 @@ from .schemas import (
     NodeManifest,
     PipelineArtifacts,
     ResourceDocument,
-    SourceAssignment,
     SourceAssignmentResult,
     SourceRef,
     WikiResourceInput,
@@ -31,25 +30,16 @@ from .schemas import (
     WikiNode,
 )
 from .uri import (
-    card_json_uri,
     card_md_uri,
     cards_dir,
-    logs_md_uri,
-    manifest_uri,
     node_document_uri,
     node_documents_dir,
-    node_evidence_uri,
-    node_manifest_uri,
     node_md_uri,
     node_root_uri,
-    node_source_ref_uri,
     node_sources_dir,
-    nodes_json_uri,
     profile_uri,
-    prompts_log_uri,
-    raw_outputs_log_uri,
-    run_config_uri,
-    source_assignments_uri,
+    run_dir,
+    wiki_root,
 )
 from .writer import WikiVikingFSWriter
 
@@ -73,9 +63,9 @@ class WikiMVPPipeline:
         )
         self.profiler = ResourceSpaceProfiler(self.llm)
         self.node_discovery = NodeDiscoveryRunner(self.llm, self.config)
-        self.assignment_runner = SourceAssignmentRunner(self.llm, self.config)
+        self.source_ref_builder = SourceRefBuilder(self.config)
         self.content_generator = NodeContentGenerator(self.llm)
-        self.evidence_runner = EvidenceRunner(self.llm)
+        self.layer_decision_runner = LayerDecisionRunner(self.llm)
 
     async def run(self, docs: list[ResourceDocument]) -> PipelineArtifacts:
         if not docs:
@@ -87,7 +77,7 @@ class WikiMVPPipeline:
         logger.info("[WikiMVP] Generating document cards for %d docs", len(docs))
         cards = await self.card_generator.generate(docs)
         logger.info("[WikiMVP] Generated %d document cards", len(cards))
-        return await self._run_from_cards(cards, artifacts)
+        return await self._run_from_cards(cards, artifacts, _resource_documents_by_id(docs))
 
     async def run_from_inputs(
         self,
@@ -108,19 +98,35 @@ class WikiMVPPipeline:
             len(docs),
             card_input_mode,
         )
-        cards = await self.card_generator.generate_from_inputs(
-            docs,
-            content_loader=content_loader,
-            card_input_mode=card_input_mode,
-            max_card_input_chars=max_card_input_chars,
+        resource_docs = [
+            await content_loader.load_document(
+                doc,
+                mode=card_input_mode,
+                max_card_input_chars=max_card_input_chars,
+            )
+            for doc in docs
+        ]
+        cards = await self.card_generator.generate(resource_docs)
+        source_docs = (
+            resource_docs
+            if WikiCardInputMode(card_input_mode) == WikiCardInputMode.RAW_CHUNK
+            else [
+                await content_loader.load_document(
+                    doc,
+                    mode=WikiCardInputMode.RAW_CHUNK,
+                    max_card_input_chars=max_card_input_chars,
+                )
+                for doc in docs
+            ]
         )
         logger.info("[WikiMVP] Generated %d document cards", len(cards))
-        return await self._run_from_cards(cards, artifacts)
+        return await self._run_from_cards(cards, artifacts, _resource_documents_by_id(source_docs))
 
     async def _run_from_cards(
         self,
         cards: list[DocumentCard],
         artifacts: PipelineArtifacts,
+        resource_documents_by_id: dict[str, ResourceDocument],
     ) -> PipelineArtifacts:
         artifacts.cards = cards
         await self._write_cards(cards)
@@ -132,26 +138,28 @@ class WikiMVPPipeline:
         logger.info("[WikiMVP] Resource-space profile generated")
 
         all_nodes: list[WikiNode] = []
-        all_assignments: list[SourceAssignment] = []
+        all_source_refs_by_node: dict[str, list[SourceRef]] = {}
+        all_unassigned_doc_ids: list[str] = []
         all_contexts: list[GeneratedNodeContext] = []
         previous_layer_contexts: list[GeneratedNodeContext] = []
 
         for depth in range(1, self.config.limits.max_depth + 1):
             source_contexts = previous_layer_contexts
             if depth == 1:
-                logger.info("[WikiMVP] Discovering bottom-layer nodes from %d cards", len(cards))
-                layer_nodes = await self.node_discovery.discover_bottom_layer(profile, cards, depth=depth)
+                logger.info("[WikiMVP] Discovering bottom-layer nodes from %d card topics", len(cards))
+                bottom_discovery = await self.node_discovery.discover_bottom_layer(cards, depth=depth)
+                layer_nodes = bottom_discovery.nodes
             else:
                 logger.info(
                     "[WikiMVP] Discovering depth=%d parent nodes from %d previous-layer contexts",
                     depth,
                     len(source_contexts),
                 )
-                layer_nodes = await self.node_discovery.discover_parent_layer(
-                    profile,
+                parent_discovery = await self.node_discovery.discover_parent_layer(
                     source_contexts,
                     depth=depth,
                 )
+                layer_nodes = parent_discovery.nodes
 
             active_nodes = [node for node in layer_nodes if node.status == "active"]
             logger.info(
@@ -167,25 +175,37 @@ class WikiMVPPipeline:
 
             if depth == 1:
                 logger.info(
-                    "[WikiMVP] Assigning %d bottom-layer nodes to %d cards",
+                    "[WikiMVP] Building source refs for %d bottom-layer nodes from topic aggregation",
                     len(active_nodes),
-                    len(cards),
                 )
-                assignment_result = await self.assignment_runner.assign_bottom_layer(active_nodes, cards)
+                assignment_result = SourceAssignmentResult(
+                    source_refs_by_node=self.source_ref_builder.build_document_refs_by_node(
+                        bottom_discovery.source_assignments.assignments,
+                        cards,
+                    ),
+                    unassigned_doc_ids=bottom_discovery.source_assignments.unassigned_doc_ids,
+                )
             else:
                 logger.info(
-                    "[WikiMVP] Assigning %d parent nodes to %d child contexts",
+                    "[WikiMVP] Building source refs for %d parent nodes from child-node aggregation",
                     len(active_nodes),
-                    len(source_contexts),
                 )
-                assignment_result = await self.assignment_runner.assign_parent_layer(
-                    active_nodes,
-                    source_contexts,
+                child_node_ids_by_node = {
+                    item.node_id: item.source_ids
+                    for item in parent_discovery.source_assignments.assignments
+                }
+                assignment_result = SourceAssignmentResult(
+                    source_refs_by_node=self.source_ref_builder.build_child_refs_by_node(
+                        child_node_ids_by_node,
+                        source_contexts,
+                    ),
+                    child_node_ids_by_node=child_node_ids_by_node,
+                    unassigned_doc_ids=parent_discovery.source_assignments.unassigned_doc_ids,
                 )
             logger.info(
-                "[WikiMVP] Depth=%d produced %d source assignments",
+                "[WikiMVP] Depth=%d produced %d source refs",
                 depth,
-                len(assignment_result.assignments),
+                sum(len(refs) for refs in assignment_result.source_refs_by_node.values()),
             )
 
             layer_nodes, active_nodes, assignment_result = _reject_nodes_with_insufficient_refs(
@@ -208,23 +228,24 @@ class WikiMVPPipeline:
 
             all_nodes.extend(layer_nodes)
             artifacts.nodes = all_nodes
-            await self.writer.write_json(nodes_json_uri(self.config), {"nodes": all_nodes})
+            await self.writer.write_json(f"{wiki_root(self.config)}nodes.json", {"nodes": all_nodes})
 
-            all_assignments.extend(assignment_result.assignments)
-            artifacts.source_assignments = all_assignments
+            all_source_refs_by_node.update(assignment_result.source_refs_by_node)
+            all_unassigned_doc_ids.extend(assignment_result.unassigned_doc_ids)
+            artifacts.source_refs_by_node = all_source_refs_by_node
             await self.writer.write_json(
-                source_assignments_uri(self.config),
+                f"{wiki_root(self.config)}source_assignments.json",
                 {
-                    "assignments": all_assignments,
-                    "unassigned_doc_ids": assignment_result.unassigned_doc_ids,
+                    "source_refs_by_node": all_source_refs_by_node,
+                    "unassigned_doc_ids": all_unassigned_doc_ids,
                 },
             )
 
             layer_contexts = await self._generate_layer_contexts(
                 active_nodes,
                 assignment_result,
-                cards,
                 source_contexts,
+                resource_documents_by_id,
                 depth=depth,
             )
             all_contexts.extend(layer_contexts)
@@ -240,7 +261,7 @@ class WikiMVPPipeline:
             if depth >= self.config.limits.max_depth:
                 break
 
-            continue_upward = await self.evidence_runner.should_continue_upward(
+            continue_upward = await self.layer_decision_runner.should_continue_upward(
                 profile,
                 layer_contexts,
                 min_child_nodes_per_parent=self.config.limits.min_child_nodes_per_parent,
@@ -257,7 +278,7 @@ class WikiMVPPipeline:
             len(artifacts.cards),
             len(artifacts.nodes),
             len(artifacts.node_contexts),
-            self.config.wiki_root_uri,
+            wiki_root(self.config),
         )
         return artifacts
 
@@ -265,8 +286,8 @@ class WikiMVPPipeline:
         self,
         active_nodes: list[WikiNode],
         assignment_result: SourceAssignmentResult,
-        cards: list[DocumentCard],
         all_contexts: list[GeneratedNodeContext],
+        resource_documents_by_id: dict[str, ResourceDocument],
         *,
         depth: int,
     ) -> list[GeneratedNodeContext]:
@@ -286,8 +307,8 @@ class WikiMVPPipeline:
                 contexts[index] = await self._generate_node_context(
                     node,
                     assignment_result,
-                    cards,
                     all_contexts,
+                    resource_documents_by_id,
                     depth=depth,
                 )
                 logger.info("[WikiMVP] Depth=%d generated node context: %s", depth, node.node_id)
@@ -301,8 +322,8 @@ class WikiMVPPipeline:
         self,
         node: WikiNode,
         assignment_result: SourceAssignmentResult,
-        cards: list[DocumentCard],
         all_contexts: list[GeneratedNodeContext],
+        resource_documents_by_id: dict[str, ResourceDocument],
         *,
         depth: int,
     ) -> GeneratedNodeContext:
@@ -313,15 +334,14 @@ class WikiMVPPipeline:
         await self.writer.ensure_dirs([node.node_id])
         await self._write_source_refs(node, source_refs)
 
-        node_md = await self.content_generator.generate_node_md(node, source_refs)
+        node_md = await self.content_generator.generate_node_md(node)
         await self.writer.write_text(node_md_uri(self.config, node.node_id), node_md)
 
-        node_cards = _cards_for_refs(cards, source_refs)
         if depth == 1:
+            source_documents = _source_documents_for_resource_refs(source_refs, resource_documents_by_id)
             documents = await self.content_generator.generate_node_documents(
                 node,
-                source_refs,
-                cards=node_cards,
+                source_documents,
             )
         else:
             assigned_child_contexts = _assigned_child_contexts(
@@ -329,10 +349,10 @@ class WikiMVPPipeline:
                 assignment_result,
                 all_contexts,
             )
-            documents = await self.content_generator.generate_node_documents(
+            child_nodes = _child_node_document_inputs(assigned_child_contexts)
+            documents = await self.content_generator.generate_parent_node_documents(
                 node,
-                source_refs,
-                child_contexts=assigned_child_contexts,
+                child_nodes,
             )
         for document in documents:
             await self.writer.write_text(
@@ -340,19 +360,10 @@ class WikiMVPPipeline:
                 document.content,
             )
 
-        evidence = await self.evidence_runner.generate_node_evidence(
-            node,
-            documents,
-            source_refs,
-            node_cards,
-        )
-        await self.writer.write_jsonl(node_evidence_uri(self.config, node.node_id), evidence)
-
         context = GeneratedNodeContext(
             node=node,
             node_md=node_md,
             documents=documents,
-            evidence=evidence,
             source_refs=source_refs,
         )
         await self._write_node_manifest(context)
@@ -361,12 +372,12 @@ class WikiMVPPipeline:
     async def _write_cards(self, cards: list[DocumentCard]) -> None:
         for card in cards:
             await self.writer.write_text(card_md_uri(self.config, card.doc_id), card.markdown)
-            await self.writer.write_json(card_json_uri(self.config, card.doc_id), card)
+            await self.writer.write_json(f"{cards_dir(self.config)}{card.doc_id}.card.json", card)
 
     async def _write_source_refs(self, node: WikiNode, source_refs: list[SourceRef]) -> None:
         for source_ref in source_refs:
             await self.writer.write_json(
-                node_source_ref_uri(self.config, node.node_id, source_ref.doc_id),
+                f"{node_sources_dir(self.config, node.node_id)}{source_ref.doc_id}.ref.json",
                 source_ref,
             )
 
@@ -382,47 +393,119 @@ class WikiMVPPipeline:
                 node_document_uri(self.config, node.node_id, document.document_id)
                 for document in context.documents
             ],
-            evidence_jsonl=node_evidence_uri(self.config, node.node_id),
             sources_dir=node_sources_dir(self.config, node.node_id),
             num_source_refs=len(context.source_refs),
             num_node_documents=len(context.documents),
-            num_claims=len(context.evidence),
         )
-        await self.writer.write_json(node_manifest_uri(self.config, node.node_id), manifest)
+        await self.writer.write_json(f"{node_root_uri(self.config, node.node_id)}manifest.json", manifest)
 
     async def _write_manifest(self, contexts: list[GeneratedNodeContext]) -> WikiManifest:
         manifest = WikiManifest(
-            dataset=self.config.dataset,
-            split=self.config.split,
             pipeline_version=self.config.pipeline_version,
             resource_root_uri=self.config.resource_root_uri,
-            wiki_root=self.config.wiki_root_uri,
+            wiki_root=wiki_root(self.config),
             profile_uri=profile_uri(self.config),
             cards_dir=cards_dir(self.config),
             node_uris=[node_root_uri(self.config, context.node.node_id) for context in contexts],
             created_at=datetime.now(timezone.utc).isoformat(),
         )
-        await self.writer.write_json(manifest_uri(self.config), manifest)
+        await self.writer.write_json(f"{wiki_root(self.config)}manifest.json", manifest)
         return manifest
 
     async def _write_run_records(self) -> None:
+        run_root = run_dir(self.config)
         run_config = {
             "pipeline_version": self.config.pipeline_version,
             "model_config": self.config.vlm_config or {},
             "limits": asdict(self.config.limits),
         }
-        await self.writer.write_json(run_config_uri(self.config), run_config)
-        await self.writer.write_jsonl(prompts_log_uri(self.config), self.llm.log.prompts)
-        await self.writer.write_jsonl(raw_outputs_log_uri(self.config), self.llm.log.raw_outputs)
+        await self.writer.write_json(f"{run_root}config.json", run_config)
+        await self.writer.write_jsonl(f"{run_root}prompts.jsonl", self.llm.log.prompts)
+        await self.writer.write_jsonl(f"{run_root}raw_outputs.jsonl", self.llm.log.raw_outputs)
         await self.writer.write_text(
-            logs_md_uri(self.config),
+            f"{run_root}logs.md",
             "# Wiki MVP Run Logs\n\nGeneration completed without pipeline-level errors.\n",
         )
 
 
-def _cards_for_refs(cards: list[DocumentCard], source_refs: list[SourceRef]) -> list[DocumentCard]:
-    wanted = {ref.doc_id for ref in source_refs}
-    return [card for card in cards if card.doc_id in wanted]
+def _resource_documents_by_id(docs: list[ResourceDocument]) -> dict[str, ResourceDocument]:
+    return {doc.doc_id: doc for doc in docs}
+
+
+def _source_documents_for_resource_refs(
+    source_refs: list[SourceRef],
+    resource_documents_by_id: dict[str, ResourceDocument],
+) -> list[dict]:
+    source_documents: list[dict] = []
+    for source_ref in source_refs:
+        resource_document = resource_documents_by_id.get(source_ref.doc_id)
+        if not resource_document:
+            raise RuntimeError(f"node source ref has no loaded resource document: {source_ref.doc_id}")
+        source_documents.append(
+            {
+                "doc_id": source_ref.doc_id,
+                "sections": _sections_from_content(
+                    resource_document.content_or_structure,
+                    fallback_uri=source_ref.resource_uri,
+                ),
+            }
+        )
+    return source_documents
+
+
+def _child_node_document_inputs(
+    child_contexts: list[GeneratedNodeContext],
+) -> list[dict]:
+    child_nodes: list[dict] = []
+
+    for context in child_contexts:
+        child_nodes.append(
+            {
+                "title": context.node.title,
+                "scope": context.node.scope,
+                "documents": [
+                    {
+                        "content": document.content,
+                    }
+                    for document in context.documents
+                ],
+            }
+        )
+
+    return child_nodes
+
+
+def _sections_from_content(content: str, fallback_uri: str) -> list[dict]:
+    content = str(content or "").strip()
+    if not content:
+        raise RuntimeError(f"source document has no section content: {fallback_uri}")
+
+    sections: list[dict] = []
+    current_uri = ""
+    current_lines: list[str] = []
+    in_content = False
+
+    for line in content.splitlines():
+        if line.startswith("URI: "):
+            text = "\n".join(current_lines).strip()
+            if current_uri and text:
+                sections.append({"section_uri": current_uri, "content": text})
+            current_uri = line[5:].strip()
+            current_lines = []
+            in_content = False
+            continue
+        if line == "Content:":
+            in_content = True
+            continue
+        if in_content:
+            current_lines.append(line)
+
+    text = "\n".join(current_lines).strip()
+    if current_uri and text:
+        sections.append({"section_uri": current_uri, "content": text})
+    if sections:
+        return sections
+    return [{"section_uri": fallback_uri, "content": content}]
 
 
 def _reject_nodes_with_insufficient_refs(
@@ -459,16 +542,7 @@ def _reject_nodes_with_insufficient_refs(
 
     updated_layer_nodes = [
         _with_assigned_child_node_ids(
-            _reject_node_for_insufficient_refs(
-                node,
-                actual_refs=(
-                    _assigned_child_node_count(node.node_id, assignment_result, child_doc_ids_by_node)
-                    if child_doc_ids_by_node
-                    else len(assignment_result.source_refs_by_node.get(node.node_id, []))
-                ),
-                min_refs=min_child_nodes if child_doc_ids_by_node else min_refs,
-                unit_name="child nodes" if child_doc_ids_by_node else "source refs",
-            )
+            _reject_node_for_insufficient_refs(node)
             if node.node_id in unsupported_node_ids
             else node,
             assignment_result,
@@ -486,11 +560,6 @@ def _reject_nodes_with_insufficient_refs(
     }
     filtered_assignment_result = assignment_result.model_copy(
         update={
-            "assignments": [
-                assignment
-                for assignment in assignment_result.assignments
-                if assignment.node_id in supported_node_ids
-            ],
             "source_refs_by_node": {
                 node_id: refs
                 for node_id, refs in assignment_result.source_refs_by_node.items()
@@ -565,15 +634,10 @@ def _assigned_child_node_ids(
     explicit_child_node_ids = assignment_result.child_node_ids_by_node.get(node_id, [])
     if explicit_child_node_ids:
         return explicit_child_node_ids
-    assigned_doc_ids = {
-        assignment.doc_id
-        for assignment in assignment_result.assignments
-        if assignment.node_id == node_id
-    }
     return [
-        child_node_id
-        for child_node_id, child_doc_ids in child_doc_ids_by_node.items()
-        if assigned_doc_ids & child_doc_ids
+        ref.doc_id
+        for ref in assignment_result.source_refs_by_node.get(node_id, [])
+        if ref.ref_type == "wiki_node" and ref.doc_id in child_doc_ids_by_node
     ]
 
 
@@ -591,18 +655,5 @@ def _has_required_child_node(
     return bool(assigned_child_node_ids & required_child_node_ids)
 
 
-def _reject_node_for_insufficient_refs(
-    node: WikiNode,
-    actual_refs: int,
-    min_refs: int,
-    unit_name: str = "source refs",
-) -> WikiNode:
-    return node.model_copy(
-        update={
-            "status": "rejected",
-            "promotion_decision": "reject",
-            "promotion_reasons": [
-                f"assigned {unit_name} {actual_refs} lower than required {min_refs}"
-            ],
-        }
-    )
+def _reject_node_for_insufficient_refs(node: WikiNode) -> WikiNode:
+    return node.model_copy(update={"status": "rejected"})

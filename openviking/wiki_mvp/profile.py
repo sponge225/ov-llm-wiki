@@ -17,5 +17,4 @@ class ResourceSpaceProfiler:
             prompt=build_profile_prompt(cards),
             schema=ResourceSpaceProfile.model_json_schema(),
         )
-        payload = result.get("profile", result)
-        return ResourceSpaceProfile.model_validate(payload)
+        return ResourceSpaceProfile.model_validate(result)

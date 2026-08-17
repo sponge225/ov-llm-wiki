@@ -2,26 +2,42 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
+from typing import TypeVar
+
+from pydantic import ValidationError
+
 from .llm import WikiLLMRunner
-from .prompts import build_node_documents_prompt, build_node_md_prompt
-from .schemas import DocumentCard, GeneratedNodeContext, NodeDocument, SourceRef, WikiNode
+from .prompts import (
+    build_node_documents_prompt,
+    build_node_md_prompt,
+    build_parent_node_documents_prompt,
+)
+from .schemas import (
+    NodeDocument,
+    NodeDocumentsResponse,
+    NodeMarkdownResponse,
+    WikiNode,
+)
+
+logger = logging.getLogger(__name__)
+MAX_VALIDATION_ATTEMPTS = 3
+T = TypeVar("T")
 
 
 class NodeContentGenerator:
     def __init__(self, llm: WikiLLMRunner):
         self.llm = llm
 
-    async def generate_node_md(self, node: WikiNode, source_refs: list[SourceRef]) -> str:
+    async def generate_node_md(self, node: WikiNode) -> str:
         result = await self.llm.complete_json(
             step="node_md",
-            prompt=build_node_md_prompt(node, source_refs),
-            schema={
-                "type": "object",
-                "properties": {"node_md": {"type": "string"}},
-                "required": ["node_md"],
-            },
+            prompt=build_node_md_prompt(node),
+            schema=NodeMarkdownResponse.model_json_schema(),
         )
-        node_md = result["node_md"].strip()
+        response = NodeMarkdownResponse.model_validate(result)
+        node_md = response.node_md.strip()
         if not node_md:
             raise RuntimeError(f"node_md for {node.node_id} is empty")
         return node_md
@@ -29,42 +45,108 @@ class NodeContentGenerator:
     async def generate_node_documents(
         self,
         node: WikiNode,
-        source_refs: list[SourceRef],
-        cards: list[DocumentCard] | None = None,
-        child_contexts: list[GeneratedNodeContext] | None = None,
+        source_documents: list[dict],
     ) -> list[NodeDocument]:
-        result = await self.llm.complete_json(
-            step="node_documents",
-            prompt=build_node_documents_prompt(
-                node,
-                source_refs,
-                cards=cards,
-                child_nodes=child_contexts,
-            ),
-            schema={
-                "type": "object",
-                "properties": {"documents": {"type": "array"}},
-                "required": ["documents"],
-            },
+        prompt = build_node_documents_prompt(
+            node,
+            source_documents,
         )
-        documents = [_coerce_document(item) for item in result["documents"]]
+        return await _complete_with_validation_retry(
+            self.llm,
+            step="node_documents",
+            prompt=prompt,
+            schema=NodeDocumentsResponse.model_json_schema(),
+            node_id=node.node_id,
+            validate=lambda result: self._parse_node_documents_result(
+                node,
+                result,
+            ),
+        )
+
+    async def generate_parent_node_documents(
+        self,
+        node: WikiNode,
+        child_nodes: list[dict],
+    ) -> list[NodeDocument]:
+        prompt = build_parent_node_documents_prompt(
+            node,
+            child_nodes,
+        )
+        return await _complete_with_validation_retry(
+            self.llm,
+            step="parent_node_documents",
+            prompt=prompt,
+            schema=NodeDocumentsResponse.model_json_schema(),
+            node_id=node.node_id,
+            validate=lambda result: self._parse_parent_node_documents_result(
+                node,
+                result,
+            ),
+        )
+
+    def _parse_node_documents_result(
+        self,
+        node: WikiNode,
+        result: dict,
+    ) -> list[NodeDocument]:
+        response = NodeDocumentsResponse.model_validate(result)
+        documents = _build_node_documents(response.documents)
         if not documents:
             raise RuntimeError(f"node_documents for {node.node_id} is empty")
-        return [_normalize_document_id(document, index) for index, document in enumerate(documents, start=1)]
+        return documents
+
+    def _parse_parent_node_documents_result(
+        self,
+        node: WikiNode,
+        result: dict,
+    ) -> list[NodeDocument]:
+        response = NodeDocumentsResponse.model_validate(result)
+        documents = _build_node_documents(response.documents)
+        if not documents:
+            raise RuntimeError(f"node_documents for {node.node_id} is empty")
+        return documents
 
 
-def _normalize_document_id(document: NodeDocument, index: int) -> NodeDocument:
-    return document.model_copy(update={"document_id": f"{index:04d}"})
+def _build_node_documents(document_contents: list) -> list[NodeDocument]:
+    return [
+        NodeDocument.model_validate(
+            {
+                **document.model_dump(mode="json"),
+                "document_id": f"{index:04d}",
+            }
+        )
+        for index, document in enumerate(document_contents, start=1)
+    ]
 
 
-def _coerce_document(item: object) -> NodeDocument:
-    if isinstance(item, str):
-        return NodeDocument(document_id="0001", content=item)
-    if isinstance(item, dict):
-        payload = dict(item)
-        payload.setdefault("document_id", "0001")
-        payload.setdefault("title", "High-Level Knowledge")
-        if "content" not in payload and "markdown" in payload:
-            payload["content"] = payload["markdown"]
-        return NodeDocument.model_validate(payload)
-    raise TypeError(f"node document item must be object or string, got {type(item).__name__}")
+async def _complete_with_validation_retry(
+    llm: WikiLLMRunner,
+    *,
+    step: str,
+    prompt: str,
+    schema: dict,
+    node_id: str,
+    validate: Callable[[dict], T],
+) -> T:
+    last_error: Exception | None = None
+    for attempt in range(1, MAX_VALIDATION_ATTEMPTS + 1):
+        result = await llm.complete_json(
+            step=step,
+            prompt=prompt,
+            schema=schema,
+        )
+        try:
+            return validate(result)
+        except (RuntimeError, ValidationError) as exc:
+            last_error = exc
+            if attempt == MAX_VALIDATION_ATTEMPTS:
+                break
+            logger.info(
+                "[WikiMVP] Retrying %s for node_id=%s after validation failure attempt=%d/%d",
+                step,
+                node_id,
+                attempt,
+                MAX_VALIDATION_ATTEMPTS,
+            )
+    assert last_error is not None
+    raise last_error

@@ -1,0 +1,44 @@
+metadata:
+  id: "wiki.bottom_node_discovery"
+  name: "Wiki Bottom Node Discovery"
+  description: "Aggregate document candidate topics into bottom-layer Wiki nodes"
+  version: "1.0.0"
+  language: "en"
+  category: "wiki"
+
+variables:
+  - name: "boundary"
+    type: "string"
+    description: "Wiki MVP data boundary instruction"
+    required: true
+  - name: "input_json"
+    type: "string"
+    description: "JSON encoded document topic records"
+    required: true
+
+template: |
+  Aggregate document-level candidate topics into bottom-layer Wiki nodes.
+
+  {{ boundary }}
+
+  Each output node must represent a reusable knowledge topic supported by multiple documents.
+
+  Rules:
+  - Use only doc_id, candidate_topics, and summary from the input topic records.
+  - Prefer a compact set of well-supported nodes over many narrow nodes.
+  - Merge closely related candidate topics into one stronger node.
+  - Create a separate node only when its scope is clearly distinct from existing nodes.
+  - Do not create one node per document.
+  - Do not create broad catch-all or generic overview nodes.
+  - Each node should be supported by at least min_refs_per_node distinct documents.
+  - A document may support multiple Wiki nodes. Assign the same doc_id to every node it substantively supports.
+  - supporting_doc_ids must contain only doc_id values from the input.
+  - merged_candidate_topics must contain candidate topic strings from the input that were merged into the node.
+  - unassigned_doc_ids only includes documents that do not substantively support any returned node.
+  - Do not return identifiers, hierarchy fields, status fields, counts, decisions, or reasons.
+
+  Input:
+  {{ input_json }}
+
+llm_config:
+  temperature: 0.0

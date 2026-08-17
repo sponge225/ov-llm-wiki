@@ -19,6 +19,7 @@ class WikiVikingFSWriter:
         self.config = config
 
     async def ensure_dirs(self, node_ids: list[str] | None = None) -> None:
+        """创建必要的目录"""
         dirs = [
             wiki_uri.wiki_root(self.config),
             wiki_uri.cards_dir(self.config),
@@ -35,11 +36,9 @@ class WikiVikingFSWriter:
             )
 
         for directory in dirs:
-            await self._mkdir(directory)
+            await self.client.mkdir(directory)
 
     async def write_text(self, uri: str, content: str) -> None:
-        if self.config.dry_run:
-            return
         try:
             await self.client.write(uri=uri, content=content, mode="create")
         except Exception as exc:
@@ -56,16 +55,6 @@ class WikiVikingFSWriter:
         if content:
             content += "\n"
         await self.write_text(uri, content)
-
-    async def _mkdir(self, uri: str) -> None:
-        if self.config.dry_run:
-            return
-        try:
-            await self.client.mkdir(uri)
-        except Exception as exc:
-            message = str(exc).lower()
-            if "exist" not in message and "already" not in message:
-                raise
 
 
 def _to_jsonable(value: Any) -> Any:
