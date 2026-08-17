@@ -8,7 +8,6 @@ Provides resource management operations: add_resource, add_skill, wait_processed
 
 import asyncio
 import contextlib
-import hashlib
 import inspect
 import json
 import time
@@ -1382,20 +1381,13 @@ class ResourceService:
         wiki_config = None
         vlm_config = getattr(get_openviking_config(), "vlm", None)
         from openviking.wiki_mvp.config import WikiMVPConfig
-        from openviking.wiki_mvp.uri import sanitize_node_id
 
         root_uri = str(
             (wiki_inputs[0].metadata or {}).get("root_uri")
             or wiki_inputs[0].document_dir_uri
             or wiki_inputs[0].resource_uri
         )
-        root_tail = root_uri.rstrip("/").rsplit("/", 1)[-1] or "resource"
-        root_hash = hashlib.sha1(root_uri.encode("utf-8")).hexdigest()[:8]
-        try:
-            root_slug = sanitize_node_id(root_tail)
-        except ValueError:
-            root_slug = "resource"
-        wiki_root_uri = f"viking://wiki/{root_slug}_{root_hash}/"
+        wiki_root_uri = "viking://wiki/"
         logger.info(
             "[ResourceService] Starting Wiki build root_uri=%s wiki_root_uri=%s docs=%d card_input_mode=%s",
             root_uri,

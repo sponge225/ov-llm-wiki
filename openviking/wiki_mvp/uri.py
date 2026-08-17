@@ -1,4 +1,4 @@
-"""URI helpers for Wiki MVP assets."""
+"""Wiki 产物 URI 的拼接工具。"""
 
 from __future__ import annotations
 
@@ -25,28 +25,12 @@ def profile_uri(config: WikiMVPConfig) -> str:
     return f"{wiki_root(config)}profile.json"
 
 
-def nodes_json_uri(config: WikiMVPConfig) -> str:
-    return f"{wiki_root(config)}nodes.json"
-
-
-def source_assignments_uri(config: WikiMVPConfig) -> str:
-    return f"{wiki_root(config)}source_assignments.json"
-
-
-def manifest_uri(config: WikiMVPConfig) -> str:
-    return f"{wiki_root(config)}manifest.json"
-
-
 def cards_dir(config: WikiMVPConfig) -> str:
     return f"{wiki_root(config)}cards/"
 
 
 def card_md_uri(config: WikiMVPConfig, doc_id: str) -> str:
     return f"{cards_dir(config)}{doc_id}.card.md"
-
-
-def card_json_uri(config: WikiMVPConfig, doc_id: str) -> str:
-    return f"{cards_dir(config)}{doc_id}.card.json"
 
 
 def nodes_dir(config: WikiMVPConfig) -> str:
@@ -69,40 +53,12 @@ def node_document_uri(config: WikiMVPConfig, node_id: str, document_id: str) -> 
     return f"{node_documents_dir(config, node_id)}{document_id}.md"
 
 
-def node_evidence_uri(config: WikiMVPConfig, node_id: str) -> str:
-    return f"{node_root_uri(config, node_id)}evidence.jsonl"
-
-
 def node_sources_dir(config: WikiMVPConfig, node_id: str) -> str:
     return f"{node_root_uri(config, node_id)}sources/"
 
 
-def node_source_ref_uri(config: WikiMVPConfig, node_id: str, doc_id: str) -> str:
-    return f"{node_sources_dir(config, node_id)}{doc_id}.ref.json"
-
-
-def node_manifest_uri(config: WikiMVPConfig, node_id: str) -> str:
-    return f"{node_root_uri(config, node_id)}manifest.json"
-
-
 def run_dir(config: WikiMVPConfig) -> str:
     return f"{wiki_root(config)}run/"
-
-
-def run_config_uri(config: WikiMVPConfig) -> str:
-    return f"{run_dir(config)}config.json"
-
-
-def prompts_log_uri(config: WikiMVPConfig) -> str:
-    return f"{run_dir(config)}prompts.jsonl"
-
-
-def raw_outputs_log_uri(config: WikiMVPConfig) -> str:
-    return f"{run_dir(config)}raw_outputs.jsonl"
-
-
-def logs_md_uri(config: WikiMVPConfig) -> str:
-    return f"{run_dir(config)}logs.md"
 
 
 def _slash(uri: str) -> str:

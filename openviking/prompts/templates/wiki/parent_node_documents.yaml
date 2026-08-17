@@ -1,0 +1,93 @@
+metadata:
+  id: "wiki.parent_node_documents"
+  name: "Wiki Parent Node Documents"
+  description: "Generate synthesized documents for a parent Wiki node"
+  version: "1.0.0"
+  language: "en"
+  category: "wiki"
+
+variables:
+  - name: "boundary"
+    type: "string"
+    description: "Wiki MVP data boundary instruction"
+    required: true
+  - name: "input_json"
+    type: "string"
+    description: "JSON encoded parent node and child node documents"
+    required: true
+
+template: |
+  Write the Markdown content for the parent Wiki node using only the provided child node document contents.
+
+  {{ boundary }}
+
+  ## Input shape
+  The input JSON contains two parts:
+  - The parent node, with a title and scope. These define the topic boundary for the document you must write.
+  - A list of child nodes. Each child node has a title, scope, and one or more Markdown document contents generated at the lower layer.
+
+  Use the child node titles and scopes only to understand what each lower-layer node covers. Use only the child node document contents as source material for factual statements. Do not use child node titles, child node scopes, or the order of child nodes as the structure of the output.
+
+  ## Objective
+  Produce a parent-level knowledge document, not a collection of child-document summaries. The output should read as an integrated, higher-level explanation of the parent topic.
+
+  ## Source and scope constraints
+  - Use only the provided child node document contents as source material.
+  - Treat the parent node title and scope as the strict parent topic boundary.
+  - Include only content that belongs within this parent-level boundary.
+  - Exclude related but out-of-scope material, even if it appears in the child node document contents.
+  - Do not use any external knowledge.
+  - Inference is allowed only when it is directly supported by the provided child node document contents. Do not introduce claims that cannot be reasonably derived from them.
+  - Do not invent citations, URLs, examples, identifiers, or missing details.
+
+  ## Synthesis requirements
+  - Synthesize across child node documents instead of summarizing them one by one.
+  - Organize the document by parent-level knowledge: conclusions, mechanisms, patterns, tradeoffs, comparisons, decision logic, common structure, or recurring themes.
+  - Do not organize by child node, source document, or document order.
+  - Do not write one paragraph per child node.
+  - Do not use headings or paragraph openings that name, enumerate, or track individual child nodes.
+
+  ## Paragraph-level quality bar
+  Each substantive paragraph must:
+  - make one parent-level claim, conclusion, pattern, mechanism, tradeoff, or comparison;
+  - be written as synthesized knowledge rather than source-by-source reporting;
+  - integrate evidence from multiple child node documents whenever multiple relevant documents are available;
+  - use child-specific facts only as supporting details inside the paragraph, not as the paragraph's organizing structure.
+
+  If only one child node document supports a point, include it only when it is clearly within the parent node scope and still contributes to the parent-level understanding. Even then, write it in a parent-level explanatory style rather than as a document summary.
+
+  ## Anti-patterns to avoid
+  Do NOT:
+  - summarize the first child node, then the second child node, then the third child node;
+  - mirror the structure or ordering of the child nodes or their documents;
+  - write paragraphs that begin with or revolve around individual child node names;
+  - produce a fact list with minimal synthesis;
+  - include any statement that is not supported by the provided child node document contents.
+
+  ## Writing style
+  - Write in a concise, neutral, knowledge-document style.
+  - Prefer synthesis over exhaustiveness.
+  - Emphasize higher-order understanding over isolated facts.
+  - Use specific details only when they clarify or support a synthesized point.
+
+  ## Final test before answering
+  Before producing the final document, check:
+  1. Is the document organized around parent-level ideas rather than child documents?
+  2. Does each substantive paragraph express synthesized knowledge?
+  3. Where multiple child documents are relevant, did the paragraph integrate them rather than describe them separately?
+  4. Is every claim supported by the provided child node document contents?
+  5. Did I avoid external knowledge and unsupported inference?
+
+  If any answer is "no", revise before returning the Markdown.
+
+  Input:
+  {{ input_json }}
+
+  Output requirements:
+  - documents: Markdown content for the parent Wiki node. Use one document by default; split into multiple documents only to keep each document readable when the content is long.
+  - The document must read like a new parent-level synthesis, not a sequence of per-child summaries.
+
+  Return only JSON matching the schema.
+
+llm_config:
+  temperature: 0.0

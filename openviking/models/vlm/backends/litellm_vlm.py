@@ -275,6 +275,7 @@ class LiteLLMVLMProvider(VLMBase):
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
         thinking: Optional[bool] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Build kwargs for LiteLLM call."""
         kwargs: dict[str, Any] = {
@@ -297,6 +298,8 @@ class LiteLLMVLMProvider(VLMBase):
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
+        if response_format:
+            kwargs["response_format"] = response_format
         if self.extra_request_body:
             kwargs["extra_body"] = dict(self.extra_request_body)
 
@@ -383,10 +386,18 @@ class LiteLLMVLMProvider(VLMBase):
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> dict[str, Any]:
         model = self._resolve_model(self.model or "gpt-4o-mini")
         kwargs_messages = messages or [{"role": "user", "content": prompt}]
-        return self._build_kwargs(model, kwargs_messages, tools, tool_choice, thinking=thinking)
+        return self._build_kwargs(
+            model,
+            kwargs_messages,
+            tools,
+            tool_choice,
+            thinking=thinking,
+            response_format=response_format,
+        )
 
     def _build_vision_kwargs(
         self,
@@ -416,9 +427,17 @@ class LiteLLMVLMProvider(VLMBase):
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> Union[str, VLMResponse]:
         """Get text completion synchronously."""
-        kwargs = self._build_text_kwargs(prompt, thinking, tools, tool_choice, messages)
+        kwargs = self._build_text_kwargs(
+            prompt,
+            thinking,
+            tools,
+            tool_choice,
+            messages,
+            response_format,
+        )
 
         def _call() -> Union[str, VLMResponse]:
             t0 = time.perf_counter()
@@ -445,9 +464,17 @@ class LiteLLMVLMProvider(VLMBase):
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> Union[str, VLMResponse]:
         """Get text completion asynchronously."""
-        kwargs = self._build_text_kwargs(prompt, thinking, tools, tool_choice, messages)
+        kwargs = self._build_text_kwargs(
+            prompt,
+            thinking,
+            tools,
+            tool_choice,
+            messages,
+            response_format,
+        )
         # 用 tracer.info 打印请求
         tracer.info(f"request: {json.dumps(kwargs, ensure_ascii=False, indent=2)}")
 

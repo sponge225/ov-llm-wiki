@@ -85,6 +85,7 @@ class VLMBase(ABC):
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> Union[str, VLMResponse]:
         """Get text completion
 
@@ -94,6 +95,7 @@ class VLMBase(ABC):
             tools: Optional list of tool definitions in OpenAI function format
             tool_choice: Optional tool choice mode ("auto", "none", or specific tool name)
             messages: Optional list of message dicts (takes precedence over prompt)
+            response_format: Optional provider-native structured output format
 
         Returns:
             str if no tools provided, VLMResponse if tools provided
@@ -108,6 +110,7 @@ class VLMBase(ABC):
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> Union[str, VLMResponse]:
         """Get text completion asynchronously
 
@@ -117,6 +120,7 @@ class VLMBase(ABC):
             tools: Optional list of tool definitions in OpenAI function format
             tool_choice: Optional tool choice mode ("auto", "none", or specific tool name)
             messages: Optional list of message dicts (takes precedence over prompt)
+            response_format: Optional provider-native structured output format
 
         Returns:
             str if no tools provided, VLMResponse if tools provided
@@ -486,6 +490,7 @@ class FailoverVLM(VLMBase):
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> Union[str, VLMResponse]:
         """Get text completion with failover support."""
         return self._get_completion_with_failover(
@@ -495,6 +500,7 @@ class FailoverVLM(VLMBase):
             tools=tools,
             tool_choice=tool_choice,
             messages=messages,
+            response_format=response_format,
         )
 
     async def get_completion_async(
@@ -504,6 +510,7 @@ class FailoverVLM(VLMBase):
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> Union[str, VLMResponse]:
         """Get text completion asynchronously with failover support."""
         return await self._get_completion_with_failover_async(
@@ -513,6 +520,7 @@ class FailoverVLM(VLMBase):
             tools=tools,
             tool_choice=tool_choice,
             messages=messages,
+            response_format=response_format,
         )
 
     def get_vision_completion(
@@ -750,6 +758,7 @@ class MultiCredentialVLM(VLMBase):
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> Union[str, VLMResponse]:
         """Get text completion with multi-credential failover support."""
         return self._get_completion_with_failover(
@@ -759,6 +768,7 @@ class MultiCredentialVLM(VLMBase):
             tools=tools,
             tool_choice=tool_choice,
             messages=messages,
+            response_format=response_format,
         )
 
     async def get_completion_async(
@@ -768,6 +778,7 @@ class MultiCredentialVLM(VLMBase):
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
+        response_format: Optional[Dict[str, Any]] = None,
     ) -> Union[str, VLMResponse]:
         """Get text completion asynchronously with multi-credential failover support."""
         return await self._get_completion_with_failover_async(
@@ -777,6 +788,7 @@ class MultiCredentialVLM(VLMBase):
             tools=tools,
             tool_choice=tool_choice,
             messages=messages,
+            response_format=response_format,
         )
 
     def get_vision_completion(

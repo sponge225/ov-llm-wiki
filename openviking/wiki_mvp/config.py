@@ -1,4 +1,4 @@
-"""Configuration for Wiki MVP generation."""
+"""Wiki MVP 生成管线配置。"""
 
 from __future__ import annotations
 
@@ -8,33 +8,29 @@ from typing import Any
 
 @dataclass
 class WikiMVPGenerationLimits:
+    # 每层最多保留多少个可生成内容的 Wiki 节点。
     max_active_nodes: int = 20
-    max_depth: int = 2
-    min_support_docs: int = 3
-    max_doc_overlap_with_existing_node: float = 0.8
+    # 最多向上聚合多少层 Wiki 节点。
+    max_depth: int = 3
+    # 父节点至少要覆盖多少个子节点，否则不会保留。
     min_child_nodes_per_parent: int = 3
+    # 底层节点至少要绑定多少个来源引用，否则会被拒绝。
     min_refs_per_node: int = 3
-    min_card_coverage: float = 0.95
-    max_words_per_node_document: int = 800
+    # 同时发起多少个文档卡片生成请求。
     max_concurrent_cards: int = 10
-    max_concurrent_nodes: int = 4
+    # 同时发起多少个节点内容生成请求。
+    max_concurrent_nodes: int = 10
 
 
 @dataclass
 class WikiMVPConfig:
+    # 写入产物中的管线版本标识。
     pipeline_version: str = "wiki_mvp_v2_doc_card"
+    # 来源资源所在的根 URI，用来校验和记录引用来源。
     resource_root_uri: str = "viking://resources/"
+    # Wiki 产物写入的根 URI。
     wiki_root_uri: str = "viking://wiki/"
-    dataset: str = "oarel_related_work"
-    split: str = "validation_00000"
+    # 控制节点数量、层数、过滤阈值和并发量。
     limits: WikiMVPGenerationLimits = field(default_factory=WikiMVPGenerationLimits)
+    # 传给底层 VLM/LLM 的模型配置。
     vlm_config: dict[str, Any] | None = None
-    dry_run: bool = False
-
-    def __post_init__(self) -> None:
-        self.resource_root_uri = _ensure_trailing_slash(self.resource_root_uri)
-        self.wiki_root_uri = _ensure_trailing_slash(self.wiki_root_uri)
-
-
-def _ensure_trailing_slash(uri: str) -> str:
-    return uri if uri.endswith("/") else f"{uri}/"

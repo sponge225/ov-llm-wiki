@@ -145,6 +145,18 @@ Output format requirements:
     return prompt
 
 
+def _json_schema_response_format(schema: Dict[str, Any], schema_name: str) -> Dict[str, Any]:
+    safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", schema_name).strip("_") or "structured_output"
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": safe_name,
+            "schema": schema,
+            "strict": True,
+        },
+    }
+
+
 class StructuredVLM:
     """
     Wrapper for VLM with structured output support.
@@ -175,20 +187,21 @@ class StructuredVLM:
         self,
         prompt: str = "",
         schema: Optional[Dict[str, Any]] = None,
+        schema_name: str = "structured_output",
         thinking: Optional[bool] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Get JSON completion from VLM."""
         effective_thinking = self._get_vlm().thinking if thinking is None else thinking
-        if schema and not messages:
-            prompt = f"{prompt}\n\n{get_json_schema_prompt(schema)}"
+        response_format = _json_schema_response_format(schema, schema_name) if schema else None
 
         response = self._get_vlm().get_completion(
             prompt=prompt,
             thinking=effective_thinking,
             tools=tools,
             messages=messages,
+            response_format=response_format,
         )
         return parse_json_from_response(response)
 
@@ -196,20 +209,21 @@ class StructuredVLM:
         self,
         prompt: str = "",
         schema: Optional[Dict[str, Any]] = None,
+        schema_name: str = "structured_output",
         thinking: Optional[bool] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Async version of complete_json."""
         effective_thinking = self._get_vlm().thinking if thinking is None else thinking
-        if schema and not messages:
-            prompt = f"{prompt}\n\n{get_json_schema_prompt(schema)}"
+        response_format = _json_schema_response_format(schema, schema_name) if schema else None
 
         response = await self._get_vlm().get_completion_async(
             prompt=prompt,
             thinking=effective_thinking,
             tools=tools,
             messages=messages,
+            response_format=response_format,
         )
         return parse_json_from_response(response)
 

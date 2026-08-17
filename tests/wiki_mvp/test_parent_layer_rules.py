@@ -2,7 +2,6 @@ from openviking.wiki_mvp.pipeline import _reject_nodes_with_insufficient_refs
 from openviking.wiki_mvp.schemas import (
     GeneratedNodeContext,
     NodeDocument,
-    SourceAssignment,
     SourceAssignmentResult,
     SourceRef,
     WikiNode,
@@ -58,16 +57,6 @@ def test_parent_layer_rejects_parent_without_previous_layer_child():
 def _assignment_result(node_id: str, child_node_ids: list[str]) -> SourceAssignmentResult:
     refs = [_source_ref(f"doc_{index}") for index in range(1, len(child_node_ids) + 1)]
     return SourceAssignmentResult(
-        assignments=[
-            SourceAssignment(
-                node_id=node_id,
-                doc_id=ref.doc_id,
-                resource_uri=ref.resource_uri,
-                card_uri=ref.card_uri,
-                support_scope=ref.support_scope,
-            )
-            for ref in refs
-        ],
         source_refs_by_node={node_id: refs},
         child_node_ids_by_node={node_id: child_node_ids},
     )
@@ -78,7 +67,6 @@ def _context(node_id: str, doc_id: str, depth: int) -> GeneratedNodeContext:
         node=_node(node_id, depth=depth),
         node_md=f"# {node_id}",
         documents=[NodeDocument(document_id="0001", content=f"# {node_id}\n\nKnowledge.")],
-        evidence=[],
         source_refs=[_source_ref(doc_id)],
     )
 
@@ -87,15 +75,8 @@ def _node(node_id: str, depth: int) -> WikiNode:
     return WikiNode(
         node_id=node_id,
         title=node_id.replace("_", " ").title(),
-        status="active",
         depth=depth,
         scope="Supported topic.",
-        seed_doc_ids=["doc_1"],
-        supporting_doc_count=1,
-        promotion_decision="promote_to_node",
-        promotion_reasons=["supported"],
-        inclusion_criteria=["related"],
-        exclusion_criteria=["unrelated"],
     )
 
 
