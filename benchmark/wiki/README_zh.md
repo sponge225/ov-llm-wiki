@@ -695,12 +695,20 @@ uv run python benchmark/wiki/scripts/prepare_dataset.py \
 
 PDF 会缓存在 `benchmark/wiki/raw_data/MDAQA/pdf_cache/`。下载器串行访问 arXiv，并在 manifest 中记录每篇 PDF 的 SHA-256；再次运行时会复用已经验证的文件。
 
-构建 143 篇论文的资源库和 Wiki：
+将 143 篇论文导入资源库：
 
 ```bash
 uv run python benchmark/wiki/run.py \
   --config benchmark/wiki/config/MDAQA/mdaqa_first_100.yaml \
   --step import
+```
+
+基于已导入的资源构建 Wiki：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/MDAQA/mdaqa_first_100.yaml \
+  --step build_wiki
 ```
 
 执行全部 100 条 QA 并评测：
@@ -738,12 +746,20 @@ uv run python benchmark/wiki/scripts/prepare_dataset.py \
 
 PDF 使用共享缓存。因此先准备 57 篇、再准备 93 篇时，只需下载新增论文。若 OpenReview 要求登录，脚本会交互式读取邮箱和隐藏密码，不会保存凭据。
 
-每个文档范围只需入库一次。例如先构建 57 篇资源库和 Wiki：
+每个文档范围只需入库一次。例如先导入 57 篇论文：
 
 ```bash
 uv run python benchmark/wiki/run.py \
   --config benchmark/wiki/config/PaperScope_summary/paperscope_summary_57_trend.yaml \
   --step import
+```
+
+然后基于已导入的资源构建 Wiki：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/PaperScope_summary/paperscope_summary_57_trend.yaml \
+  --step build_wiki
 ```
 
 然后三种问题类型复用同一个 57 篇向量库：
