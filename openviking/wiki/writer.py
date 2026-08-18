@@ -1,4 +1,4 @@
-"""vikingfs writer for Wiki MVP assets."""
+"""vikingfs writer for Wiki assets."""
 
 from __future__ import annotations
 
@@ -9,12 +9,12 @@ from typing import Any
 from pydantic import BaseModel
 from openviking_cli.exceptions import NotFoundError
 
-from .config import WikiMVPConfig
+from .config import WikiConfig
 from . import uri as wiki_uri
 
 
 class WikiVikingFSWriter:
-    def __init__(self, client: Any, config: WikiMVPConfig):
+    def __init__(self, client: Any, config: WikiConfig):
         self.client = client
         self.config = config
 

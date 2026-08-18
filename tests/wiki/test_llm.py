@@ -1,6 +1,6 @@
 import pytest
 
-from openviking.wiki_mvp.llm import WikiLLMRunner
+from openviking.wiki.llm import WikiLLMRunner
 
 from .fakes import FakeVLM
 

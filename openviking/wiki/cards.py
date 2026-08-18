@@ -71,7 +71,7 @@ class DocumentCardGenerator:
         except ValidationError:
             for attempt in range(1, 4):
                 logger.info(
-                    "[WikiMVP] Retrying document card generation for doc_id=%s attempt=%d/3",
+                    "[Wiki] Retrying document card generation for doc_id=%s attempt=%d/3",
                     doc.doc_id,
                     attempt,
                 )

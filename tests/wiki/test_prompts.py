@@ -1,14 +1,14 @@
 import pytest
 
 from openviking.prompts.manager import PromptManager
-from openviking.wiki_mvp.prompts import (
+from openviking.wiki.prompts import (
     build_bottom_node_discovery_prompt,
     build_document_card_prompt,
     build_node_documents_prompt,
     build_parent_node_documents_prompt,
     build_parent_node_discovery_prompt,
 )
-from openviking.wiki_mvp.schemas import (
+from openviking.wiki.schemas import (
     DocumentCard,
     GeneratedNodeContext,
     ResourceDocument,

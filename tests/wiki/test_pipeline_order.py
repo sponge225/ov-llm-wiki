@@ -1,9 +1,9 @@
 import pytest
 
-from openviking.wiki_mvp.config import WikiMVPConfig, WikiMVPGenerationLimits
-from openviking.wiki_mvp.llm import WikiLLMRunner
-from openviking.wiki_mvp.pipeline import WikiMVPPipeline
-from openviking.wiki_mvp.schemas import ResourceDocument
+from openviking.wiki.config import WikiConfig, WikiGenerationLimits
+from openviking.wiki.llm import WikiLLMRunner
+from openviking.wiki.pipeline import WikiPipeline
+from openviking.wiki.schemas import ResourceDocument
 
 from .fakes import FakeClient, FakeVLM
 
@@ -33,7 +33,7 @@ async def test_pipeline_generates_layer_content_before_next_layer_decision():
     llm = WikiLLMRunner(fake_vlm)
     client = FakeClient()
 
-    artifacts = await WikiMVPPipeline(client=client, config=WikiMVPConfig(), llm=llm).run(docs)
+    artifacts = await WikiPipeline(client=client, config=WikiConfig(), llm=llm).run(docs)
 
     assert [record.step for record in llm.log.raw_outputs] == [
         "doc_card",
@@ -89,9 +89,9 @@ async def test_pipeline_does_not_precreate_unassigned_active_node_dirs():
     )
     llm = WikiLLMRunner(fake_vlm)
     client = FakeClient()
-    config = WikiMVPConfig(limits=WikiMVPGenerationLimits(min_refs_per_node=2))
+    config = WikiConfig(limits=WikiGenerationLimits(min_refs_per_node=2))
 
-    artifacts = await WikiMVPPipeline(client=client, config=config, llm=llm).run(docs)
+    artifacts = await WikiPipeline(client=client, config=config, llm=llm).run(docs)
 
     assert "viking://wiki/nodes/question_answering/" in client.mkdirs
     assert "viking://wiki/nodes/unassigned_topic/" not in client.mkdirs

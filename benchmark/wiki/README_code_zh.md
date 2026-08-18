@@ -13,7 +13,7 @@ run.py
   -> 加载 .env / YAML / ov.conf
   -> 动态加载 Adapter
   -> 创建 BenchmarkPipeline
-  -> 按 --step 执行 import / gen / eval
+  -> 按 --step 执行 import / build_wiki / gen / eval
 ```
 
 当前核心模式是：
@@ -77,12 +77,13 @@ Output/
 
 | `--step` | 执行的方法 | 说明 |
 | --- | --- | --- |
-| `import` | `BenchmarkPipeline.run_import()` | 准备文档、入库、构建 Wiki。 |
+| `import` | `BenchmarkPipeline.run_import()` | 准备文档并入库。 |
+| `build_wiki` | `BenchmarkPipeline.run_build_wiki()` | 基于上次 import 记录的资源根生成 Wiki。 |
 | `gen` | `BenchmarkPipeline.run_generation()` | 读取 QA，调用 VikingBot 或 baseline 生成答案。 |
 | `eval` | `BenchmarkPipeline.run_evaluation()` | 读取已有答案，计算指标和 LLM judge 分数。 |
-| `gen+eval` | `run_generation()` + `run_evaluation()` | 复用已有入库结果，只重跑问答和评测。 |
-| `all` | `run_import()` + `run_generation()` + `run_evaluation()` | 从入库到评测完整跑一遍。 |
-| `del` | `BenchmarkPipeline.run_deletion()` | 调用删除逻辑清理 vector store。 |
+| `gen+eval` | `run_generation()` + `run_evaluation()` | 复用已有入库和 Wiki 结果，只重跑问答和评测。 |
+| `all` | `run_import()` + 可选 `run_build_wiki()` + `run_generation()` + `run_evaluation()` | 从入库到评测完整跑一遍。 |
+| `del` | `BenchmarkPipeline.run_deletion()` | 调用删除逻辑清理 OpenViking 资源和 Wiki。 |
 
 ## `src/pipeline.py`
 
@@ -95,6 +96,7 @@ Output/
 主要输出文件：
 
 ```text
+imported_resources.json
 generated_answers.json
 qa_eval_detailed_results.json
 benchmark_metrics_report.json
@@ -116,8 +118,26 @@ adapter.data_prepare(doc_output_dir)
 
 - 入库前文档如何准备。
 - `ingest_mode` 如何传给 OpenViking。
-- 是否构建 Wiki。
 - 入库指标如何写进报告。
+- `imported_resources.json` 如何记录后续 Wiki 生成需要的资源根。
+
+### `run_build_wiki()`
+
+功能：Wiki 生成阶段。
+
+核心调用关系：
+
+```text
+imported_resources.json
+  -> VikingStoreWrapper.build_wiki(...)
+  -> OpenViking build_wiki(...)
+```
+
+你想改这些逻辑时看这里：
+
+- Wiki 生成读取哪些已导入资源。
+- `wiki_card_input_mode` 和 `wiki_max_card_input_chars` 如何传给 OpenViking。
+- Wiki 生成指标如何写进报告。
 
 ### `run_generation()`
 
@@ -279,9 +299,10 @@ benchmark/wiki/src/adapters/
 | --- | --- |
 | `VikingStoreWrapper.__init__()` | 初始化 `openviking.SyncOpenViking`。 |
 | `ingest()` | 调 `add_resource()` 入库，支持 `directory` / `per_file`。 |
+| `build_wiki()` | 调独立 `build_wiki()` 接口生成 Wiki。 |
 | `retrieve()` | baseline 模式下调用 `client.find()`。 |
 | `read_resource()` | baseline 模式下读取资源内容。 |
-| `clear()` | 清理 `viking://resources` 和 `viking://wiki`。 |
+| `clear()` | 清理 `viking://resources`，并调用独立 `clear_wiki()` 清理 Wiki。 |
 | `close()` | 关闭底层 OpenViking client。 |
 | `count_tokens()` | 粗略统计 token。 |
 
@@ -346,7 +367,8 @@ benchmark/wiki/scripts/
 
 | 产物 | 负责代码 | 说明 |
 | --- | --- | --- |
-| `wiki_storage/<dataset_name>/...` | `VikingStoreWrapper.ingest()` | OpenViking 存储、索引、Wiki 产物。 |
+| `wiki_storage/<dataset_name>/...` | `VikingStoreWrapper.ingest()` / `VikingStoreWrapper.build_wiki()` | OpenViking 存储、索引、Wiki 产物。 |
+| `imported_resources.json` | `BenchmarkPipeline.run_import()` | `import` 阶段写入，`build_wiki` 阶段读取的资源根清单。 |
 | `generated_answers.json` | `BenchmarkPipeline.run_generation()` | 每条问题的生成答案和 trace 信息。 |
 | `qa_eval_detailed_results.json` | `BenchmarkPipeline.run_evaluation()` | 每条问题的评测明细。 |
 | `benchmark_metrics_report.json` | `BenchmarkPipeline._update_report()` | 汇总指标。 |
@@ -362,7 +384,8 @@ benchmark/wiki/scripts/
 | --- | --- |
 | 新增命令行参数 | `run.py -> main()` |
 | 改 `--step` 执行顺序 | `run.py -> # --- E. Execute Tasks ---` |
-| 改入库/Wiki 构建参数 | `pipeline.py -> run_import()`，`core/vector_store.py -> ingest()` |
+| 改入库参数 | `pipeline.py -> run_import()`，`core/vector_store.py -> ingest()` |
+| 改 Wiki 构建参数 | `pipeline.py -> run_build_wiki()`，`core/vector_store.py -> build_wiki()` |
 | 改生成答案流程 | `pipeline.py -> run_generation()` |
 | 改 VikingBot 提示词或 CLI 参数 | `vikingbot_runner.py -> VikingBotRunner.generate_answer()` |
 | 改 server 启停/端口占用逻辑 | `vikingbot_runner.py -> _ensure_openviking_server()` |
@@ -379,7 +402,7 @@ benchmark/wiki/scripts/
 | adapter 导入失败 | YAML 的 `adapter.module/class_name`，`run.py` 动态导入处。 |
 | 数据文件找不到 | YAML 的 `paths.dataset_path`，`run.py` 路径解析。 |
 | 入库失败 | `pipeline.py -> run_import()`，`core/vector_store.py -> ingest()`。 |
-| Wiki 没生成 | YAML 的 `build_wiki`，`wiki_card_input_mode`，OpenViking 日志。 |
+| Wiki 没生成 | `imported_resources.json`，YAML 的 `build_wiki` / `wiki_card_input_mode`，`pipeline.py -> run_build_wiki()`，OpenViking 日志。 |
 | VikingBot 无答案或报错 | `vikingbot_runner.py`，`.temp/openviking-server.log`，`.temp/bot_json/`。 |
 | JSON 解析失败 | `.temp/vikingbot-json-error.*.stdout.txt`，`_extract_vikingbot_json()`。 |
 | 评测报错 | `pipeline.py -> run_evaluation()`，`core/judge_util.py`。 |

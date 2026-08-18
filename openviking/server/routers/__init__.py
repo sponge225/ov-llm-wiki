@@ -25,6 +25,7 @@ from openviking.server.routers.tasks import router as tasks_router
 from openviking.server.routers.user_settings import router as user_settings_router
 from openviking.server.routers.watches import router as watches_router
 from openviking.server.routers.webdav import router as webdav_router
+from openviking.wiki.router import router as wiki_router
 
 __all__ = [
     "admin_router",
@@ -50,4 +51,5 @@ __all__ = [
     "user_settings_router",
     "watches_router",
     "webdav_router",
+    "wiki_router",
 ]

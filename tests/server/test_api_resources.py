@@ -7,7 +7,10 @@ import asyncio
 import zipfile
 
 import httpx
+import pytest
+from pydantic import ValidationError
 
+from openviking.server.routers.resources import AddResourceRequest
 from openviking.storage.viking_fs import get_viking_fs
 from openviking.telemetry import get_current_telemetry
 
@@ -95,6 +98,15 @@ async def test_add_resource_forwards_args_to_service(
 
     assert resp.status_code == 200
     assert seen["args"] == {"feishu_access_token": "u-test"}
+
+
+def test_add_resource_rejects_removed_wiki_parameters():
+    with pytest.raises(ValidationError):
+        AddResourceRequest(
+            path="https://example.com/demo.md",
+            build_wiki=True,
+        )
+
 
 
 async def test_add_resource_preserves_create_parent_field_presence(

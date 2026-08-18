@@ -1,4 +1,4 @@
-"""LLM wrapper for Wiki MVP structured calls."""
+"""LLM wrapper for Wiki structured calls."""
 
 from __future__ import annotations
 
