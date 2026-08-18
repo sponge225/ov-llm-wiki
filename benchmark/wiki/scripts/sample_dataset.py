@@ -1158,9 +1158,9 @@ def sample_paperscope_summary_57(
     if sample_size is not None or num_docs is not None:
         raise ValueError("PaperScopeSummary57 only supports the full valid QA set")
     try:
-        from .paperscope_summary import prepare_paperscope_summary
+        from .dataset_handlers.paperscope_summary import prepare_paperscope_summary
     except ImportError:
-        from paperscope_summary import prepare_paperscope_summary
+        from dataset_handlers.paperscope_summary import prepare_paperscope_summary
 
     return prepare_paperscope_summary(
         input_dir, output_dir, document_scope="valid"
@@ -1179,9 +1179,9 @@ def sample_paperscope_summary_93(
     if sample_size is not None or num_docs is not None:
         raise ValueError("PaperScopeSummary93 only supports the full valid QA set")
     try:
-        from .paperscope_summary import prepare_paperscope_summary
+        from .dataset_handlers.paperscope_summary import prepare_paperscope_summary
     except ImportError:
-        from paperscope_summary import prepare_paperscope_summary
+        from dataset_handlers.paperscope_summary import prepare_paperscope_summary
 
     return prepare_paperscope_summary(
         input_dir, output_dir, document_scope="all"
@@ -1202,11 +1202,67 @@ def sample_mdaqa_first_100(
             "MDAQAFirst100 is a fixed subset and does not accept sampling options"
         )
     try:
-        from .mdaqa import prepare_mdaqa_first_100
+        from .dataset_handlers.mdaqa import prepare_mdaqa_first_100
     except ImportError:
-        from mdaqa import prepare_mdaqa_first_100
+        from dataset_handlers.mdaqa import prepare_mdaqa_first_100
 
     return prepare_mdaqa_first_100(input_dir, output_dir)
+
+
+def _sample_wildgraphbench_summary(
+    input_dir: Path,
+    output_dir: Path,
+    *,
+    scope: str,
+    sample_size: Optional[int],
+    num_docs: Optional[int],
+) -> Dict[str, Any]:
+    if sample_size is not None or num_docs is not None:
+        raise ValueError(
+            "WildGraphBench Summary scopes are fixed and do not accept sampling options"
+        )
+    try:
+        from .dataset_handlers.wildgraphbench import prepare_wildgraphbench_summary
+    except ImportError:
+        from dataset_handlers.wildgraphbench import prepare_wildgraphbench_summary
+
+    return prepare_wildgraphbench_summary(input_dir, output_dir, scope=scope)
+
+
+def sample_wildgraphbench_summary_all(
+    input_dir: Path,
+    output_dir: Path,
+    sample_size: Optional[int] = None,
+    num_docs: Optional[int] = None,
+    seed: int = 42,
+    sample_mode: str = "random",
+) -> Dict[str, Any]:
+    """Prepare all reference pages and all Summary questions."""
+    return _sample_wildgraphbench_summary(
+        input_dir,
+        output_dir,
+        scope="all",
+        sample_size=sample_size,
+        num_docs=num_docs,
+    )
+
+
+def sample_wildgraphbench_summary_health(
+    input_dir: Path,
+    output_dir: Path,
+    sample_size: Optional[int] = None,
+    num_docs: Optional[int] = None,
+    seed: int = 42,
+    sample_mode: str = "random",
+) -> Dict[str, Any]:
+    """Prepare Health reference pages and Health Summary questions."""
+    return _sample_wildgraphbench_summary(
+        input_dir,
+        output_dir,
+        scope="health",
+        sample_size=sample_size,
+        num_docs=num_docs,
+    )
 
 
 DATASET_SAMPLERS = {
@@ -1217,6 +1273,8 @@ DATASET_SAMPLERS = {
     "PaperScopeSummary57": sample_paperscope_summary_57,
     "PaperScopeSummary93": sample_paperscope_summary_93,
     "MDAQAFirst100": sample_mdaqa_first_100,
+    "WildGraphBenchSummaryAll": sample_wildgraphbench_summary_all,
+    "WildGraphBenchSummaryHealth": sample_wildgraphbench_summary_health,
 }
 
 

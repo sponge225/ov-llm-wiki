@@ -772,6 +772,45 @@ uv run python benchmark/wiki/run.py --config benchmark/wiki/config/PaperScope_su
 
 93 篇版本使用 `config/PaperScope_summary/` 下对应的 `paperscope_summary_93_*.yaml`，运行顺序相同。
 
+### WildGraphBench Summary
+
+WildGraphBench Summary 提供两个固定实验范围：
+
+- `WildGraphBenchSummaryAll`：入库12个主题下的3894篇 `reference_pages` TXT，运行全部339条 Summary QA。
+- `WildGraphBenchSummaryHealth`：只入库 Health 主题下的509篇 `reference_pages` TXT，运行该主题的55条 Summary QA。
+
+两个范围均使用固定的上游 Git revision，且不接受 `--sample-size` 或 `--num-docs`。准备全部主题：
+
+```bash
+uv run python benchmark/wiki/scripts/prepare_dataset.py \
+  --dataset WildGraphBenchSummaryAll \
+  --download-dir benchmark/wiki/raw_data \
+  --output-dir benchmark/wiki/datasets
+```
+
+只准备 Health：
+
+```bash
+uv run python benchmark/wiki/scripts/prepare_dataset.py \
+  --dataset WildGraphBenchSummaryHealth \
+  --download-dir benchmark/wiki/raw_data \
+  --output-dir benchmark/wiki/datasets
+```
+
+运行相应实验：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/WildGraphBench/wildgraphbench_summary_all.yaml \
+  --step all
+
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/WildGraphBench/wildgraphbench_summary_health.yaml \
+  --step all
+```
+
+Adapter 会把每条 QA 的多个 `gold_statements` 合并为一个完整标准答案，以便继续使用项目现有的通用 F1 和 LLM judge；原始陈述列表与 `ref_urls` 仍保留在 QA metadata 中。该结果不是 WildGraphBench 官方陈述级指标。
+
 下载并生成 Qasper 示例数据：
 
 ```bash

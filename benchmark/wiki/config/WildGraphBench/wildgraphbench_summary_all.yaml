@@ -1,0 +1,33 @@
+project_name: "Wiki_Benchmark"
+dataset_name: "wildgraphbench_summary_all"
+
+adapter:
+  module: "src.adapters.wildgraphbench_summary_adapter"
+  class_name: "WildGraphBenchSummaryAdapter"
+
+execution:
+  mode: "vikingbot"
+  server_port: 2026
+  max_workers: 1
+  retrieval_topk: 5
+  max_queries: null
+  skip_ingestion: false
+  ingest_mode: "directory"
+  build_wiki: true
+  wiki_card_input_mode: "summary"
+  wiki_max_card_input_chars: 20000
+  retrieval_instruction: ""
+
+paths:
+  dataset_path: "datasets/WildGraphBenchSummaryAll/summary_questions.jsonl"
+  doc_output_dir: "wiki_storage/wildgraphbench_summary_all/wildgraphbench_summary_all_processed_docs"
+  vector_store: "wiki_storage/wildgraphbench_summary_all/wildgraphbench_summary_all_viking_store_index"
+  output_dir: "Output/{dataset_name}/wiki"
+  log_file: "Output/{dataset_name}/wiki/benchmark.log"
+
+llm:
+  model: "${OV_VLM_MODEL}"
+  provider: "${OV_VLM_PROVIDER}"
+  temperature: 0
+  base_url: "${OV_VLM_API_BASE}"
+  api_key_env_var: "OV_VLM_API_KEY"

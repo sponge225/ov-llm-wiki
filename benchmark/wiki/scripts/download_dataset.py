@@ -75,6 +75,26 @@ DATASET_SOURCES = {
         "source_type": "mdaqa_first_100",
         "files": ["MDA-QA.json", "documents.jsonl", "pdfs/"],
     },
+    "WildGraphBenchSummaryAll": {
+        "source_type": "wildgraphbench_summary",
+        "scope": "all",
+        "files": [
+            "summary_questions.jsonl",
+            "documents.jsonl",
+            "dataset_info.json",
+            "reference_pages/",
+        ],
+    },
+    "WildGraphBenchSummaryHealth": {
+        "source_type": "wildgraphbench_summary",
+        "scope": "health",
+        "files": [
+            "summary_questions.jsonl",
+            "documents.jsonl",
+            "dataset_info.json",
+            "reference_pages/",
+        ],
+    },
 }
 
 
@@ -191,9 +211,9 @@ def verify_dataset(dataset_name: str, dataset_dir: Path) -> bool:
     source = DATASET_SOURCES[dataset_name]
     if source.get("source_type") == "paperscope_summary":
         try:
-            from .paperscope_summary import verify_paperscope_download
+            from .dataset_handlers.paperscope_summary import verify_paperscope_download
         except ImportError:
-            from paperscope_summary import verify_paperscope_download
+            from dataset_handlers.paperscope_summary import verify_paperscope_download
 
         valid = verify_paperscope_download(dataset_dir, source["document_scope"])
         if valid:
@@ -204,15 +224,28 @@ def verify_dataset(dataset_name: str, dataset_dir: Path) -> bool:
 
     if source.get("source_type") == "mdaqa_first_100":
         try:
-            from .mdaqa import verify_mdaqa_download
+            from .dataset_handlers.mdaqa import verify_mdaqa_download
         except ImportError:
-            from mdaqa import verify_mdaqa_download
+            from dataset_handlers.mdaqa import verify_mdaqa_download
 
         valid = verify_mdaqa_download(dataset_dir)
         if valid:
             print(f"✓ {dataset_name} verified successfully")
         else:
             print(f"MDA-QA download verification failed: {dataset_dir}")
+        return valid
+
+    if source.get("source_type") == "wildgraphbench_summary":
+        try:
+            from .dataset_handlers.wildgraphbench import verify_wildgraphbench_download
+        except ImportError:
+            from dataset_handlers.wildgraphbench import verify_wildgraphbench_download
+
+        valid = verify_wildgraphbench_download(dataset_dir, source["scope"])
+        if valid:
+            print(f"✓ {dataset_name} verified successfully")
+        else:
+            print(f"WildGraphBench download verification failed: {dataset_dir}")
         return valid
 
     missing_files = []
@@ -315,9 +348,9 @@ def download_dataset(
 
     if source.get("source_type") == "paperscope_summary":
         try:
-            from .paperscope_summary import download_paperscope_summary
+            from .dataset_handlers.paperscope_summary import download_paperscope_summary
         except ImportError:
-            from paperscope_summary import download_paperscope_summary
+            from dataset_handlers.paperscope_summary import download_paperscope_summary
 
         return download_paperscope_summary(
             output_dir=output_dir,
@@ -329,13 +362,27 @@ def download_dataset(
 
     if source.get("source_type") == "mdaqa_first_100":
         try:
-            from .mdaqa import download_mdaqa_first_100
+            from .dataset_handlers.mdaqa import download_mdaqa_first_100
         except ImportError:
-            from mdaqa import download_mdaqa_first_100
+            from dataset_handlers.mdaqa import download_mdaqa_first_100
 
         return download_mdaqa_first_100(
             output_dir=output_dir,
             dataset_name=dataset_name,
+            force=force,
+            verify=verify,
+        )
+
+    if source.get("source_type") == "wildgraphbench_summary":
+        try:
+            from .dataset_handlers.wildgraphbench import download_wildgraphbench_summary
+        except ImportError:
+            from dataset_handlers.wildgraphbench import download_wildgraphbench_summary
+
+        return download_wildgraphbench_summary(
+            output_dir=output_dir,
+            dataset_name=dataset_name,
+            scope=source["scope"],
             force=force,
             verify=verify,
         )
