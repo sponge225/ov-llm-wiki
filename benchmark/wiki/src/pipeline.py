@@ -36,6 +36,7 @@ class BenchmarkPipeline:
         self.generated_file = os.path.join(self.output_dir, "generated_answers.json")
         self.eval_file = os.path.join(self.output_dir, "qa_eval_detailed_results.json")
         self.report_file = os.path.join(self.output_dir, "benchmark_metrics_report.json")
+        self.resource_manifest_file = os.path.join(self.output_dir, "imported_resources.json")
         
         self.metrics_summary = {
             "insertion": {"time": 0, "input_tokens": 0, "output_tokens": 0, "embedding_tokens": 0},
@@ -59,12 +60,6 @@ class BenchmarkPipeline:
             exit(1)
 
         ingest_mode = self.config['execution'].get('ingest_mode', 'per_file')
-        build_wiki = bool(self.config['execution'].get('build_wiki', False))
-        wiki_card_input_mode = self.config['execution'].get('wiki_card_input_mode', 'summary')
-        wiki_max_card_input_chars = int(
-            self.config['execution'].get('wiki_max_card_input_chars', 20000)
-        )
-
         mode_desc = {
             'directory': 'Unified directory mode',
             'per_file': 'Per-file mode'
@@ -76,10 +71,8 @@ class BenchmarkPipeline:
             doc_info,
             monitor=self.monitor,
             ingest_mode=ingest_mode,
-            build_wiki=build_wiki,
-            wiki_card_input_mode=wiki_card_input_mode,
-            wiki_max_card_input_chars=wiki_max_card_input_chars,
         )
+        self._write_resource_manifest(ingest_stats.get("resource_uris", []))
         self.metrics_summary["insertion"] = ingest_stats
         self.logger.info(f"Insertion finished. Time: {ingest_stats['time']:.2f}s")
 
@@ -92,7 +85,35 @@ class BenchmarkPipeline:
             }
         })
 
-        self.db.close()
+    def run_build_wiki(self):
+        """Stage: Build Wiki from resources imported by the import step."""
+        self.logger.info(">>> Stage: Build Wiki")
+        if not self.db:
+            raise RuntimeError("Cannot build Wiki without a vector store")
+
+        resource_uris = self._read_resource_manifest()
+        wiki_card_input_mode = self.config['execution'].get('wiki_card_input_mode', 'summary')
+        wiki_max_card_input_chars = int(
+            self.config['execution'].get('wiki_max_card_input_chars', 20000)
+        )
+        self.logger.info(f"Building Wiki for {len(resource_uris)} resource roots")
+        wiki_stats = self.db.build_wiki(
+            resource_uris=resource_uris,
+            card_input_mode=wiki_card_input_mode,
+            max_card_input_chars=wiki_max_card_input_chars,
+        )
+        self.logger.info(f"Wiki build finished. Time: {wiki_stats['time']:.2f}s")
+        self._update_report({
+            "Wiki Generation": {
+                "Total Wiki Build Time (s)": wiki_stats["time"],
+                "Resource Roots": resource_uris,
+                "Status": wiki_stats.get("status"),
+                "Cards": wiki_stats.get("cards", 0),
+                "Nodes": wiki_stats.get("nodes", 0),
+                "Node Contexts": wiki_stats.get("node_contexts", 0),
+            }
+        })
+        return wiki_stats
 
     def run_generation(self):
         """Stage: Generate answers for QA queries."""
@@ -455,3 +476,24 @@ class BenchmarkPipeline:
         with open(self.report_file, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=4, ensure_ascii=False)
         self.logger.info(f"Report updated -> {self.report_file}")
+
+    def _write_resource_manifest(self, resource_uris):
+        data = {"resource_uris": list(resource_uris or [])}
+        with open(self.resource_manifest_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        self.logger.info(f"Imported resource manifest -> {self.resource_manifest_file}")
+
+    def _read_resource_manifest(self):
+        if not os.path.exists(self.resource_manifest_file):
+            raise FileNotFoundError(
+                f"Imported resource manifest not found: {self.resource_manifest_file}. "
+                "Run --step import first."
+            )
+        with open(self.resource_manifest_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        resource_uris = data.get("resource_uris", [])
+        if not resource_uris:
+            raise RuntimeError(
+                f"Imported resource manifest contains no resource roots: {self.resource_manifest_file}"
+            )
+        return resource_uris

@@ -9,7 +9,7 @@ metadata:
 variables:
   - name: "boundary"
     type: "string"
-    description: "Wiki MVP data boundary instruction"
+    description: "Wiki data boundary instruction"
     required: true
   - name: "input_json"
     type: "string"

@@ -1,8 +1,8 @@
 import pytest
 
-from openviking.wiki_mvp.documents import NodeContentGenerator
-from openviking.wiki_mvp.llm import WikiLLMRunner
-from openviking.wiki_mvp.schemas import WikiNode
+from openviking.wiki.documents import NodeContentGenerator
+from openviking.wiki.llm import WikiLLMRunner
+from openviking.wiki.schemas import WikiNode
 
 from .fakes import FakeVLM
 

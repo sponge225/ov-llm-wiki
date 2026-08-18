@@ -1,4 +1,4 @@
-"""Pydantic schemas used by the Wiki MVP pipeline."""
+"""Pydantic schemas used by the Wiki pipeline."""
 
 from __future__ import annotations
 
@@ -52,19 +52,14 @@ NonEmptyStrList = Annotated[list[str], Field(min_length=1)]
 
 
 class StrictModel(BaseModel):
-    """所有 Wiki MVP 数据模型的基类，禁止接收未声明字段。"""
+    """所有 Wiki 数据模型的基类，禁止接收未声明字段。"""
     model_config = ConfigDict(extra="forbid")
 
 
 class ResourceDocumentDraft(StrictModel):
-    """解析器列出的待生成 Document Card 的文档条目。"""
+    """解析器列出的文档边界条目。"""
     doc_id: NonEmptyStr
     title: NonEmptyStr
-    source_type: NonEmptyStr = "resource_document"
-    summary: str = ""
-    abstract: str = ""
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    document_dir_uri_hint: str = ""
     relative_uri: str = ""
 
 

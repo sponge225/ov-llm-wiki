@@ -235,9 +235,6 @@ class SyncOpenViking:
         timeout: float = None,
         build_index: bool = True,
         summarize: bool = False,
-        build_wiki: bool = False,
-        wiki_card_input_mode: str = "summary",
-        wiki_max_card_input_chars: int = 20000,
         args: Optional[Dict[str, Any]] = None,
         telemetry: TelemetryRequest = False,
         **kwargs,
@@ -270,12 +267,41 @@ class SyncOpenViking:
                 timeout=timeout,
                 build_index=build_index,
                 summarize=summarize,
-                build_wiki=build_wiki,
-                wiki_card_input_mode=wiki_card_input_mode,
-                wiki_max_card_input_chars=wiki_max_card_input_chars,
                 args=args,
                 telemetry=telemetry,
                 **kwargs,
+            )
+        )
+
+    def build_wiki(
+        self,
+        resource_uris: List[str],
+        wiki_root_uri: str = "viking://wiki/",
+        card_input_mode: str = "summary",
+        max_card_input_chars: int = 20000,
+        telemetry: TelemetryRequest = False,
+    ) -> Dict[str, Any]:
+        """Build Wiki from existing resources."""
+        return run_async(
+            self._async_client.build_wiki(
+                resource_uris=resource_uris,
+                wiki_root_uri=wiki_root_uri,
+                card_input_mode=card_input_mode,
+                max_card_input_chars=max_card_input_chars,
+                telemetry=telemetry,
+            )
+        )
+
+    def clear_wiki(
+        self,
+        wiki_root_uri: str = "viking://wiki/",
+        telemetry: TelemetryRequest = False,
+    ) -> Dict[str, Any]:
+        """Clear generated Wiki assets."""
+        return run_async(
+            self._async_client.clear_wiki(
+                wiki_root_uri=wiki_root_uri,
+                telemetry=telemetry,
             )
         )
 

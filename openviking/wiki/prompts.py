@@ -1,4 +1,4 @@
-"""Prompt builders for Wiki MVP generation."""
+"""Prompt builders for Wiki generation."""
 
 from __future__ import annotations
 

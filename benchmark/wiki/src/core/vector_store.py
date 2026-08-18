@@ -35,20 +35,20 @@ class VikingStoreWrapper:
         samples: List[StandardDoc],
         monitor=None,
         ingest_mode="per_file",
-        build_wiki: bool = False,
-        wiki_card_input_mode: str = "summary",
-        wiki_max_card_input_chars: int = 20000,
     ) -> dict:
         start_time = time.time()
         total_input_tokens = 0
         total_output_tokens = 0
         total_embedding_tokens = 0
+        resource_uris: list[str] = []
         
         if not samples:
             return {
                 "time": time.time() - start_time,
                 "input_tokens": 0,
-                "output_tokens": 0
+                "output_tokens": 0,
+                "embedding_tokens": 0,
+                "resource_uris": [],
             }
         
         if ingest_mode == "directory":
@@ -65,10 +65,9 @@ class VikingStoreWrapper:
                     common_ancestor,
                     wait=True,
                     telemetry=True,
-                    build_wiki=build_wiki,
-                    wiki_card_input_mode=wiki_card_input_mode,
-                    wiki_max_card_input_chars=wiki_max_card_input_chars,
                 )
+                if result.get("root_uri"):
+                    resource_uris.append(result["root_uri"])
                 telemetry = result.get("telemetry", {})
                 summary = telemetry.get("summary", {})
                 tokens = summary.get("tokens", {})
@@ -83,10 +82,9 @@ class VikingStoreWrapper:
                         sample.doc_path,
                         wait=True,
                         telemetry=True,
-                        build_wiki=build_wiki,
-                        wiki_card_input_mode=wiki_card_input_mode,
-                        wiki_max_card_input_chars=wiki_max_card_input_chars,
                     )
+                    if result.get("root_uri"):
+                        resource_uris.append(result["root_uri"])
                     telemetry = result.get("telemetry", {})
                     summary = telemetry.get("summary", {})
                     tokens = summary.get("tokens", {})
@@ -101,10 +99,9 @@ class VikingStoreWrapper:
                     sample.doc_path,
                     wait=True,
                     telemetry=True,
-                    build_wiki=build_wiki,
-                    wiki_card_input_mode=wiki_card_input_mode,
-                    wiki_max_card_input_chars=wiki_max_card_input_chars,
                 )
+                if result.get("root_uri"):
+                    resource_uris.append(result["root_uri"])
                 telemetry = result.get("telemetry", {})
                 summary = telemetry.get("summary", {})
                 tokens = summary.get("tokens", {})
@@ -118,8 +115,30 @@ class VikingStoreWrapper:
             "time": time.time() - start_time,
             "input_tokens": total_input_tokens,
             "output_tokens": total_output_tokens,
-            "embedding_tokens": total_embedding_tokens
+            "embedding_tokens": total_embedding_tokens,
+            "resource_uris": resource_uris,
         }
+
+    def build_wiki(
+        self,
+        resource_uris: list[str],
+        card_input_mode: str = "summary",
+        max_card_input_chars: int = 20000,
+    ) -> dict:
+        start_time = time.time()
+        if not resource_uris:
+            return {
+                "time": time.time() - start_time,
+                "status": "skipped",
+                "resource_uris": [],
+            }
+        result = self.client.build_wiki(
+            resource_uris=resource_uris,
+            card_input_mode=card_input_mode,
+            max_card_input_chars=max_card_input_chars,
+        )
+        result["time"] = time.time() - start_time
+        return result
 
     def retrieve(self, query: str, topk: int, target_uri: str = "viking://resources"):
         """Execute retrieval"""
@@ -133,7 +152,7 @@ class VikingStoreWrapper:
         """Clear the store"""
         self.client.rm("viking://resources", recursive=True)
         try:
-            self.client.rm("viking://wiki", recursive=True)
+            self.client.clear_wiki()
         except Exception:
             pass
 

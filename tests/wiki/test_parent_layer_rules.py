@@ -1,5 +1,5 @@
-from openviking.wiki_mvp.pipeline import _reject_nodes_with_insufficient_refs
-from openviking.wiki_mvp.schemas import (
+from openviking.wiki.pipeline import _reject_nodes_with_insufficient_refs
+from openviking.wiki.schemas import (
     GeneratedNodeContext,
     NodeDocument,
     SourceAssignmentResult,

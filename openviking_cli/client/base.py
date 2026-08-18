@@ -43,13 +43,31 @@ class BaseClient(ABC):
         wait: bool = False,
         timeout: Optional[float] = None,
         watch_interval: float = 0,
-        build_wiki: bool = False,
-        wiki_card_input_mode: str = "summary",
-        wiki_max_card_input_chars: int = 20000,
         args: Optional[Dict[str, Any]] = None,
         telemetry: TelemetryRequest = False,
     ) -> Dict[str, Any]:
         """Add resource to OpenViking."""
+        ...
+
+    @abstractmethod
+    async def build_wiki(
+        self,
+        resource_uris: List[str],
+        wiki_root_uri: str = "viking://wiki/",
+        card_input_mode: str = "summary",
+        max_card_input_chars: int = 20000,
+        telemetry: TelemetryRequest = False,
+    ) -> Dict[str, Any]:
+        """Build Wiki from existing resources."""
+        ...
+
+    @abstractmethod
+    async def clear_wiki(
+        self,
+        wiki_root_uri: str = "viking://wiki/",
+        telemetry: TelemetryRequest = False,
+    ) -> Dict[str, Any]:
+        """Clear generated Wiki assets."""
         ...
 
     @abstractmethod

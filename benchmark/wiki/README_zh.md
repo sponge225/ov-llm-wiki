@@ -3,7 +3,7 @@
 这个 benchmark 用来验证 OpenViking 的 Wiki 生成和 VikingBot 问答评测流程。最常用的路径是：
 
 1. 把 Qasper 示例数据导入 OpenViking。
-2. 在导入过程中构建 Wiki。
+2. 调用独立 Wiki 接口生成 Wiki。
 3. 用 VikingBot 基于 OpenViking/Wiki 回答问题。
 4. 用 LLM judge 评测答案，生成指标报告。
 
@@ -34,7 +34,7 @@ uv run python benchmark/wiki/run.py \
   --step all
 ```
 
-如果 `import` 已经成功跑过，后续通常不要重跑 `all`，直接复用入库结果：
+如果 `import` 和 `build_wiki` 已经成功跑过，后续通常不要重跑 `all`，直接复用已有结果：
 
 ```bash
 uv run python benchmark/wiki/run.py \
@@ -333,10 +333,10 @@ uv run python benchmark/wiki/run.py \
 `all` 会顺序执行：
 
 ```text
-import -> gen -> eval
+import -> 可选 build_wiki -> gen -> eval
 ```
 
-注意：当前 `run.py` 的 `all` 不会自动执行 `del`。`del` 是单独的清理步骤。
+注意：只有配置里 `build_wiki: true` 时，`all` 才会在 `import` 后继续执行 `build_wiki`。当前 `run.py` 的 `all` 不会自动执行 `del`。`del` 是单独的清理步骤。
 
 ### 每个阶段的大概含义
 
@@ -346,7 +346,12 @@ import -> gen -> eval
 - 通过 `QasperAdapter` 把数据整理成 Markdown 文档。
 - 写入 `wiki_storage/qasper_30/qasper_30_processed_docs/`。
 - 调用 OpenViking 导入资源、生成语义索引。
-- 因为 `build_wiki: true`，会继续生成 Wiki 产物。
+
+`build_wiki`：
+
+- 读取 `import` 阶段写入的 `imported_resources.json`。
+- 调用 OpenViking 的独立 Wiki 生成接口。
+- 使用 YAML 中的 `wiki_card_input_mode` 和 `wiki_max_card_input_chars`。
 
 `gen`：
 
@@ -381,7 +386,7 @@ tail -f benchmark/wiki/.temp/openviking-server.log
 
 ## 第 6 步：复用已经完成的入库结果
 
-如果 `import` 已经成功跑过，后续调试 VikingBot 或评测时，不需要从头 `--step all`。
+如果 `import` 和 `build_wiki` 已经成功跑过，后续调试 VikingBot 或评测时，不需要从头 `--step all`。
 
 先确认入库产物存在：
 
@@ -389,7 +394,21 @@ tail -f benchmark/wiki/.temp/openviking-server.log
 ls benchmark/wiki/wiki_storage/qasper_30/qasper_30_viking_store_index
 ```
 
-再确认 Wiki 产物存在：
+再确认 `import` 阶段记录的资源根存在：
+
+```bash
+cat benchmark/wiki/Output/qasper_30/wiki/imported_resources.json
+```
+
+如果还没有生成 Wiki，先单独执行：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/qasper_30.yaml \
+  --step build_wiki
+```
+
+然后确认 Wiki 产物存在：
 
 ```bash
 find benchmark/wiki/wiki_storage/qasper_30/qasper_30_viking_store_index/viking/default/wiki \
@@ -497,7 +516,7 @@ uv run python benchmark/wiki/run.py \
   --step all
 ```
 
-谨慎使用 `--step del`。它会调用 benchmark 的删除逻辑清理 vector store，但不会替你判断哪些运行产物还想保留。
+谨慎使用 `--step del`。它会调用 benchmark 的删除逻辑清理 OpenViking 资源和 Wiki，但不会替你判断哪些运行产物还想保留。
 
 ## 常见问题排查
 
@@ -784,7 +803,7 @@ uv run python benchmark/wiki/run.py \
   --step all
 ```
 
-复用入库，只跑生成和评测：
+复用已完成的入库和 Wiki，只跑生成和评测：
 
 ```bash
 uv run python benchmark/wiki/run.py \
@@ -829,7 +848,7 @@ cat benchmark/wiki/Output/qasper_30/wiki/benchmark_metrics_report.json
 跑相关测试：
 
 ```bash
-uv run pytest tests/wiki_mvp -q
+uv run pytest tests/wiki -q
 uv run pytest tests/benchmark/test_wiki_vikingbot_runner_json.py -q
 ```
 

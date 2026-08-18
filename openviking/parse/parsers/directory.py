@@ -31,7 +31,7 @@ from openviking.parse.image_rewrite import IMAGE_MAPPINGS_FILENAME
 from openviking.parse.parsers.base_parser import BaseParser
 from openviking.parse.parsers.media.constants import MEDIA_EXTENSIONS
 from openviking.storage.viking_fs import LS_ALL_NODES
-from openviking.wiki_mvp.schemas import ResourceDocumentDraft
+from openviking.wiki.schemas import ResourceDocumentDraft
 from openviking_cli.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -438,13 +438,6 @@ class DirectoryParser(BaseParser):
                     draft = ResourceDocumentDraft(
                         doc_id=DirectoryParser._wiki_doc_id(relative_uri),
                         title=PurePosixPath(relative_uri).name,
-                        source_type="resource_document",
-                        abstract=PurePosixPath(relative_uri).name,
-                        metadata={
-                            "parser_name": "DirectoryParser",
-                            "source_path": str(src_file),
-                            "source_format": src_file.suffix.lstrip(".") or "file",
-                        },
                         relative_uri=relative_uri,
                     )
                     return _ProcessedFileResult(ok=True, drafts=[draft])

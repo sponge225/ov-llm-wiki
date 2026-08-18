@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .config import WikiMVPConfig
+from .config import WikiConfig
 from .schemas import (
     DocumentCard,
     GeneratedNodeContext,
@@ -13,7 +13,7 @@ from .uri import card_md_uri, node_md_uri, node_root_uri
 
 
 class SourceRefBuilder:
-    def __init__(self, config: WikiMVPConfig):
+    def __init__(self, config: WikiConfig):
         self.config = config
 
     def build_child_refs_by_node(

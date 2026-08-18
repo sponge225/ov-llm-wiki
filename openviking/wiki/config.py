@@ -1,4 +1,4 @@
-"""Wiki MVP 生成管线配置。"""
+"""Wiki 生成管线配置。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Any
 
 
 @dataclass
-class WikiMVPGenerationLimits:
+class WikiGenerationLimits:
     # 每层最多保留多少个可生成内容的 Wiki 节点。
     max_active_nodes: int = 20
     # 最多向上聚合多少层 Wiki 节点。
@@ -23,14 +23,14 @@ class WikiMVPGenerationLimits:
 
 
 @dataclass
-class WikiMVPConfig:
+class WikiConfig:
     # 写入产物中的管线版本标识。
-    pipeline_version: str = "wiki_mvp_v2_doc_card"
+    pipeline_version: str = "wiki_v2_doc_card"
     # 来源资源所在的根 URI，用来校验和记录引用来源。
     resource_root_uri: str = "viking://resources/"
     # Wiki 产物写入的根 URI。
     wiki_root_uri: str = "viking://wiki/"
     # 控制节点数量、层数、过滤阈值和并发量。
-    limits: WikiMVPGenerationLimits = field(default_factory=WikiMVPGenerationLimits)
+    limits: WikiGenerationLimits = field(default_factory=WikiGenerationLimits)
     # 传给底层 VLM/LLM 的模型配置。
     vlm_config: dict[str, Any] | None = None

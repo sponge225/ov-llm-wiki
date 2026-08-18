@@ -9,7 +9,7 @@ from typing import TypeVar
 
 from pydantic import ValidationError
 
-from .config import WikiMVPConfig
+from .config import WikiConfig
 from .llm import WikiLLMRunner
 from .prompts import (
     build_bottom_node_discovery_prompt,
@@ -45,7 +45,7 @@ class ParentLayerDiscoveryResult:
 
 
 class NodeDiscoveryRunner:
-    def __init__(self, llm: WikiLLMRunner, config: WikiMVPConfig):
+    def __init__(self, llm: WikiLLMRunner, config: WikiConfig):
         self.llm = llm
         self.config = config
 
@@ -240,7 +240,7 @@ async def _complete_with_validation_retry(
             if attempt == MAX_VALIDATION_ATTEMPTS:
                 break
             logger.info(
-                "[WikiMVP] Retrying %s after validation failure attempt=%d/%d",
+                "[Wiki] Retrying %s after validation failure attempt=%d/%d",
                 step,
                 attempt,
                 MAX_VALIDATION_ATTEMPTS,

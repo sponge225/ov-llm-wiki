@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from openviking.wiki_mvp.config import WikiMVPConfig
-from openviking.wiki_mvp.writer import WikiVikingFSWriter
+from openviking.wiki.config import WikiConfig
+from openviking.wiki.writer import WikiVikingFSWriter
 
 from .fakes import FakeClient
 
@@ -11,7 +11,7 @@ from .fakes import FakeClient
 @pytest.mark.asyncio
 async def test_writer_writes_json_and_jsonl():
     client = FakeClient()
-    writer = WikiVikingFSWriter(client, WikiMVPConfig())
+    writer = WikiVikingFSWriter(client, WikiConfig())
 
     await writer.write_json("viking://wiki/profile.json", {"space_title": "Test"})
     await writer.write_jsonl("viking://wiki/run/raw_outputs.jsonl", [{"step": "a"}, {"step": "b"}])
@@ -26,7 +26,7 @@ async def test_writer_writes_json_and_jsonl():
 @pytest.mark.asyncio
 async def test_writer_ensure_dirs_uses_viking_wiki_root():
     client = FakeClient()
-    writer = WikiVikingFSWriter(client, WikiMVPConfig())
+    writer = WikiVikingFSWriter(client, WikiConfig())
 
     await writer.ensure_dirs(["question_answering"])
 

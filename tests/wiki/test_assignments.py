@@ -1,8 +1,8 @@
 import pytest
 
-from openviking.wiki_mvp.assignments import SourceRefBuilder
-from openviking.wiki_mvp.config import WikiMVPConfig
-from openviking.wiki_mvp.schemas import (
+from openviking.wiki.assignments import SourceRefBuilder
+from openviking.wiki.config import WikiConfig
+from openviking.wiki.schemas import (
     DocumentCard,
     GeneratedNodeContext,
     NodeDocument,
@@ -13,7 +13,7 @@ from openviking.wiki_mvp.schemas import (
 
 
 def test_source_ref_builder_binds_child_node_ids_without_inheriting_source_refs():
-    builder = SourceRefBuilder(WikiMVPConfig())
+    builder = SourceRefBuilder(WikiConfig())
 
     refs_by_node = builder.build_child_refs_by_node(
         {"parent_node": ["child_a", "child_b"]},
@@ -33,7 +33,7 @@ def test_source_ref_builder_binds_child_node_ids_without_inheriting_source_refs(
 
 
 def test_source_ref_builder_binds_document_source_ids():
-    builder = SourceRefBuilder(WikiMVPConfig())
+    builder = SourceRefBuilder(WikiConfig())
 
     refs_by_node = builder.build_document_refs_by_node(
         [
@@ -53,7 +53,7 @@ def test_source_ref_builder_binds_document_source_ids():
 
 
 def test_source_ref_builder_rejects_unknown_child_node_ids():
-    builder = SourceRefBuilder(WikiMVPConfig())
+    builder = SourceRefBuilder(WikiConfig())
 
     with pytest.raises(RuntimeError, match="unknown child node ids"):
         builder.build_child_refs_by_node(
@@ -63,7 +63,7 @@ def test_source_ref_builder_rejects_unknown_child_node_ids():
 
 
 def test_source_ref_builder_rejects_unknown_document_source_ids():
-    builder = SourceRefBuilder(WikiMVPConfig())
+    builder = SourceRefBuilder(WikiConfig())
 
     with pytest.raises(RuntimeError, match="unknown doc_id values"):
         builder.build_document_refs_by_node(

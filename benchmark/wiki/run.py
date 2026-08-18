@@ -115,8 +115,8 @@ def main():
     parser.add_argument("--config", default=default_config_path,
                         help=f"Path to config file. Default: {default_config_path}")
 
-    parser.add_argument("--step", choices=["all", "import", "gen", "eval", "gen+eval", "del"], default="all",
-                        help="Execution step: 'import', 'gen', 'eval', 'gen+eval', 'del', or 'all'")
+    parser.add_argument("--step", choices=["all", "import", "build_wiki", "gen", "eval", "gen+eval", "del"], default="all",
+                        help="Execution step: 'import', 'build_wiki', 'gen', 'eval', 'gen+eval', 'del', or 'all'")
 
     parser.add_argument("--ov-conf", type=str, default=None,
                         help="Path to ov.conf file (default: benchmark/wiki/ov.conf)")
@@ -213,6 +213,7 @@ def main():
         # 2. Vector Store
         mode = resolve_execution_mode(config)
         skip_ingestion = bool(config.get('execution', {}).get('skip_ingestion', False))
+        build_wiki_enabled = bool(config.get('execution', {}).get('build_wiki', False))
         will_import = args.step in ("all", "import") and not skip_ingestion
         if args.step == "import" and skip_ingestion:
             raise RuntimeError("execution.skip_ingestion=true conflicts with --step import")
@@ -223,6 +224,8 @@ def main():
         needs_vector_store = (
             mode == BASELINE_MODE
             or will_import
+            or args.step == "build_wiki"
+            or (args.step == "all" and build_wiki_enabled)
             or args.step == "del"
         )
         if mode == VIKINGBOT_MODE and args.step in ("gen", "eval", "gen+eval"):
@@ -261,10 +264,22 @@ def main():
                 logger.info("Stage: Import (Data Prepare -> Ingest)")
                 pipeline.run_import()
 
+            if args.step == "all" and build_wiki_enabled:
+                logger.info("Stage: Build Wiki")
+                pipeline.run_build_wiki()
+
             if args.step == "all" and mode == BASELINE_MODE and not skip_ingestion:
+                pipeline.db.close()
                 pipeline.db = VikingStoreWrapper(store_path=config['paths']['vector_store'])
 
+        if args.step == "build_wiki":
+            logger.info("Stage: Build Wiki")
+            pipeline.run_build_wiki()
+
         if args.step in ["all", "gen", "gen+eval"]:
+            if mode == VIKINGBOT_MODE and pipeline.db is not None:
+                pipeline.db.close()
+                pipeline.db = None
             logger.info("Stage: Generation")
             pipeline.run_generation()
 
