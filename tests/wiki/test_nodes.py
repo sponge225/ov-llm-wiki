@@ -1,9 +1,9 @@
 import pytest
 
-from openviking.wiki_mvp.config import WikiMVPConfig
-from openviking.wiki_mvp.llm import WikiLLMRunner
-from openviking.wiki_mvp.nodes import NodeDiscoveryRunner
-from openviking.wiki_mvp.schemas import DocumentCard
+from openviking.wiki.config import WikiConfig
+from openviking.wiki.llm import WikiLLMRunner
+from openviking.wiki.nodes import NodeDiscoveryRunner
+from openviking.wiki.schemas import DocumentCard
 
 from .fakes import FakeVLM
 from .test_pipeline_order import _card_response
@@ -23,7 +23,7 @@ async def test_node_discovery_caps_active_nodes_by_available_support():
         ]
     )
     llm = WikiLLMRunner(fake_vlm)
-    runner = NodeDiscoveryRunner(llm, WikiMVPConfig())
+    runner = NodeDiscoveryRunner(llm, WikiConfig())
 
     result = await runner.discover_bottom_layer(
         [
@@ -64,7 +64,7 @@ async def test_node_discovery_generates_node_id_and_depth():
             ]
         )
     )
-    runner = NodeDiscoveryRunner(llm, WikiMVPConfig())
+    runner = NodeDiscoveryRunner(llm, WikiConfig())
 
     result = await runner.discover_bottom_layer(
         [
@@ -106,7 +106,7 @@ async def test_node_discovery_retries_invalid_structured_output_with_same_prompt
             },
         ]
     )
-    runner = NodeDiscoveryRunner(WikiLLMRunner(fake_vlm), WikiMVPConfig())
+    runner = NodeDiscoveryRunner(WikiLLMRunner(fake_vlm), WikiConfig())
 
     result = await runner.discover_bottom_layer(
         [

@@ -36,7 +36,7 @@ from openviking.parse.parsers.constants import (
     DOCUMENTATION_EXTENSIONS,
     IGNORE_EXTENSIONS,
 )
-from openviking.wiki_mvp.schemas import ResourceDocumentDraft
+from openviking.wiki.schemas import ResourceDocumentDraft
 from openviking_cli.utils.config.parser_config import ParserConfig
 from openviking_cli.utils.logger import get_logger
 
@@ -311,15 +311,6 @@ class MarkdownParser(BaseParser):
                     ResourceDocumentDraft(
                         doc_id=self._wiki_doc_id(layout.doc_name),
                         title=str(layout.doc_title or layout.doc_name),
-                        source_type="markdown",
-                        abstract=self._wiki_draft_abstract(layout),
-                        metadata={
-                            "parser_name": "MarkdownParser",
-                            "source_path": source_path or "",
-                            "source_format": "markdown",
-                            "frontmatter": layout.meta.get("frontmatter", {}),
-                        },
-                        document_dir_uri_hint=layout.root_dir,
                         relative_uri=self._relative_layout_root(layout),
                     )
                 ],
@@ -350,15 +341,6 @@ class MarkdownParser(BaseParser):
         if root_dir.startswith(temp_root + "/"):
             return root_dir[len(temp_root) + 1 :]
         return layout.doc_name
-
-    @staticmethod
-    def _wiki_draft_abstract(layout: _Layout) -> str:
-        frontmatter = layout.meta.get("frontmatter") or {}
-        for key in ("description", "summary", "abstract"):
-            value = str(frontmatter.get(key) or "").strip()
-            if value:
-                return value
-        return str(layout.doc_title or layout.doc_name or "").strip()
 
     async def _compute_layout(
         self,

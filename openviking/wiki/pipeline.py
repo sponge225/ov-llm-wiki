@@ -1,4 +1,4 @@
-"""Wiki MVP batch generation orchestrator."""
+"""Wiki batch generation orchestrator."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any
 
 from .assignments import SourceRefBuilder
 from .cards import DocumentCardGenerator
-from .config import WikiMVPConfig
+from .config import WikiConfig
 from .content_loader import WikiCardInputMode, WikiContentLoader
 from .documents import NodeContentGenerator
 from .layer_decision import LayerDecisionRunner
@@ -47,14 +47,14 @@ from .writer import WikiVikingFSWriter
 logger = logging.getLogger(__name__)
 
 
-class WikiMVPPipeline:
+class WikiPipeline:
     def __init__(
         self,
         client: Any,
-        config: WikiMVPConfig | None = None,
+        config: WikiConfig | None = None,
         llm: WikiLLMRunner | None = None,
     ):
-        self.config = config or WikiMVPConfig()
+        self.config = config or WikiConfig()
         self.llm = llm or WikiLLMRunner(vlm_config=self.config.vlm_config)
         self.writer = WikiVikingFSWriter(client, self.config)
         self.card_generator = DocumentCardGenerator(
@@ -69,14 +69,14 @@ class WikiMVPPipeline:
 
     async def run(self, docs: list[ResourceDocument]) -> PipelineArtifacts:
         if not docs:
-            raise ValueError("Wiki MVP pipeline requires at least one resource document")
+            raise ValueError("Wiki pipeline requires at least one resource document")
 
         artifacts = PipelineArtifacts()
         await self.writer.ensure_dirs()
 
-        logger.info("[WikiMVP] Generating document cards for %d docs", len(docs))
+        logger.info("[Wiki] Generating document cards for %d docs", len(docs))
         cards = await self.card_generator.generate(docs)
-        logger.info("[WikiMVP] Generated %d document cards", len(cards))
+        logger.info("[Wiki] Generated %d document cards", len(cards))
         return await self._run_from_cards(cards, artifacts, _resource_documents_by_id(docs))
 
     async def run_from_inputs(
@@ -88,13 +88,13 @@ class WikiMVPPipeline:
         max_card_input_chars: int = 20000,
     ) -> PipelineArtifacts:
         if not docs:
-            raise ValueError("Wiki MVP pipeline requires at least one resource document")
+            raise ValueError("Wiki pipeline requires at least one resource document")
 
         artifacts = PipelineArtifacts()
         await self.writer.ensure_dirs()
 
         logger.info(
-            "[WikiMVP] Generating document cards for %d docs from %s inputs",
+            "[Wiki] Generating document cards for %d docs from %s inputs",
             len(docs),
             card_input_mode,
         )
@@ -119,7 +119,7 @@ class WikiMVPPipeline:
                 for doc in docs
             ]
         )
-        logger.info("[WikiMVP] Generated %d document cards", len(cards))
+        logger.info("[Wiki] Generated %d document cards", len(cards))
         return await self._run_from_cards(cards, artifacts, _resource_documents_by_id(source_docs))
 
     async def _run_from_cards(
@@ -131,11 +131,11 @@ class WikiMVPPipeline:
         artifacts.cards = cards
         await self._write_cards(cards)
 
-        logger.info("[WikiMVP] Generating resource-space profile")
+        logger.info("[Wiki] Generating resource-space profile")
         profile = await self.profiler.generate(cards)
         artifacts.profile = profile
         await self.writer.write_json(profile_uri(self.config), profile)
-        logger.info("[WikiMVP] Resource-space profile generated")
+        logger.info("[Wiki] Resource-space profile generated")
 
         all_nodes: list[WikiNode] = []
         all_source_refs_by_node: dict[str, list[SourceRef]] = {}
@@ -146,12 +146,12 @@ class WikiMVPPipeline:
         for depth in range(1, self.config.limits.max_depth + 1):
             source_contexts = previous_layer_contexts
             if depth == 1:
-                logger.info("[WikiMVP] Discovering bottom-layer nodes from %d card topics", len(cards))
+                logger.info("[Wiki] Discovering bottom-layer nodes from %d card topics", len(cards))
                 bottom_discovery = await self.node_discovery.discover_bottom_layer(cards, depth=depth)
                 layer_nodes = bottom_discovery.nodes
             else:
                 logger.info(
-                    "[WikiMVP] Discovering depth=%d parent nodes from %d previous-layer contexts",
+                    "[Wiki] Discovering depth=%d parent nodes from %d previous-layer contexts",
                     depth,
                     len(source_contexts),
                 )
@@ -163,7 +163,7 @@ class WikiMVPPipeline:
 
             active_nodes = [node for node in layer_nodes if node.status == "active"]
             logger.info(
-                "[WikiMVP] Depth=%d discovered %d nodes (%d active)",
+                "[Wiki] Depth=%d discovered %d nodes (%d active)",
                 depth,
                 len(layer_nodes),
                 len(active_nodes),
@@ -175,7 +175,7 @@ class WikiMVPPipeline:
 
             if depth == 1:
                 logger.info(
-                    "[WikiMVP] Building source refs for %d bottom-layer nodes from topic aggregation",
+                    "[Wiki] Building source refs for %d bottom-layer nodes from topic aggregation",
                     len(active_nodes),
                 )
                 assignment_result = SourceAssignmentResult(
@@ -187,7 +187,7 @@ class WikiMVPPipeline:
                 )
             else:
                 logger.info(
-                    "[WikiMVP] Building source refs for %d parent nodes from child-node aggregation",
+                    "[Wiki] Building source refs for %d parent nodes from child-node aggregation",
                     len(active_nodes),
                 )
                 child_node_ids_by_node = {
@@ -203,7 +203,7 @@ class WikiMVPPipeline:
                     unassigned_doc_ids=parent_discovery.source_assignments.unassigned_doc_ids,
                 )
             logger.info(
-                "[WikiMVP] Depth=%d produced %d source refs",
+                "[Wiki] Depth=%d produced %d source refs",
                 depth,
                 sum(len(refs) for refs in assignment_result.source_refs_by_node.values()),
             )
@@ -221,7 +221,7 @@ class WikiMVPPipeline:
                 if depth == 1:
                     raise RuntimeError("bottom layer produced no supported active nodes")
                 break
-            logger.info("[WikiMVP] Depth=%d retained %d supported active nodes", depth, len(active_nodes))
+            logger.info("[Wiki] Depth=%d retained %d supported active nodes", depth, len(active_nodes))
 
             if depth > 1:
                 all_nodes = _assign_parent_node_ids(all_nodes, active_nodes)
@@ -250,7 +250,7 @@ class WikiMVPPipeline:
             )
             all_contexts.extend(layer_contexts)
             logger.info(
-                "[WikiMVP] Depth=%d generated %d node contexts (total=%d)",
+                "[Wiki] Depth=%d generated %d node contexts (total=%d)",
                 depth,
                 len(layer_contexts),
                 len(all_contexts),
@@ -266,7 +266,7 @@ class WikiMVPPipeline:
                 layer_contexts,
                 min_child_nodes_per_parent=self.config.limits.min_child_nodes_per_parent,
             )
-            logger.info("[WikiMVP] Depth=%d continue_upward=%s", depth, continue_upward)
+            logger.info("[Wiki] Depth=%d continue_upward=%s", depth, continue_upward)
             if not continue_upward:
                 break
             previous_layer_contexts = layer_contexts
@@ -274,7 +274,7 @@ class WikiMVPPipeline:
         artifacts.manifest = await self._write_manifest(all_contexts)
         await self._write_run_records()
         logger.info(
-            "[WikiMVP] Completed wiki generation: cards=%d nodes=%d contexts=%d wiki_root=%s",
+            "[Wiki] Completed wiki generation: cards=%d nodes=%d contexts=%d wiki_root=%s",
             len(artifacts.cards),
             len(artifacts.nodes),
             len(artifacts.node_contexts),
@@ -295,7 +295,7 @@ class WikiMVPPipeline:
         sem = asyncio.Semaphore(max_concurrent)
         contexts: list[GeneratedNodeContext | None] = [None] * len(active_nodes)
         logger.info(
-            "[WikiMVP] Depth=%d generating %d node contexts with max_concurrent=%d",
+            "[Wiki] Depth=%d generating %d node contexts with max_concurrent=%d",
             depth,
             len(active_nodes),
             max_concurrent,
@@ -303,7 +303,7 @@ class WikiMVPPipeline:
 
         async def _generate_one(index: int, node: WikiNode) -> None:
             async with sem:
-                logger.info("[WikiMVP] Depth=%d generating node context: %s", depth, node.node_id)
+                logger.info("[Wiki] Depth=%d generating node context: %s", depth, node.node_id)
                 contexts[index] = await self._generate_node_context(
                     node,
                     assignment_result,
@@ -311,7 +311,7 @@ class WikiMVPPipeline:
                     resource_documents_by_id,
                     depth=depth,
                 )
-                logger.info("[WikiMVP] Depth=%d generated node context: %s", depth, node.node_id)
+                logger.info("[Wiki] Depth=%d generated node context: %s", depth, node.node_id)
 
         await asyncio.gather(*[_generate_one(index, node) for index, node in enumerate(active_nodes)])
         if any(context is None for context in contexts):
@@ -424,7 +424,7 @@ class WikiMVPPipeline:
         await self.writer.write_jsonl(f"{run_root}raw_outputs.jsonl", self.llm.log.raw_outputs)
         await self.writer.write_text(
             f"{run_root}logs.md",
-            "# Wiki MVP Run Logs\n\nGeneration completed without pipeline-level errors.\n",
+            "# Wiki Run Logs\n\nGeneration completed without pipeline-level errors.\n",
         )
 
 

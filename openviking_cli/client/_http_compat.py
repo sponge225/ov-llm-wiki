@@ -233,6 +233,36 @@ class AsyncHTTPClient(import_openviking_sdk().AsyncHTTPClient):
         )
         return self._handle_response_data(response).get("result", {})
 
+    async def build_wiki(
+        self,
+        resource_uris: list[str],
+        wiki_root_uri: str = "viking://wiki/",
+        card_input_mode: str = "summary",
+        max_card_input_chars: int = 20000,
+        telemetry: Any = False,
+    ) -> Dict[str, Any]:
+        payload = {
+            "resource_uris": resource_uris,
+            "wiki_root_uri": wiki_root_uri,
+            "card_input_mode": card_input_mode,
+            "max_card_input_chars": max_card_input_chars,
+            "telemetry": telemetry,
+        }
+        response = await self._request("POST", "/api/v1/wiki/build", json=payload)
+        return self._handle_response_data(response).get("result", {})
+
+    async def clear_wiki(
+        self,
+        wiki_root_uri: str = "viking://wiki/",
+        telemetry: Any = False,
+    ) -> Dict[str, Any]:
+        payload = {
+            "wiki_root_uri": wiki_root_uri,
+            "telemetry": telemetry,
+        }
+        response = await self._request("POST", "/api/v1/wiki/clear", json=payload)
+        return self._handle_response_data(response).get("result", {})
+
 
 class SyncHTTPClient(import_openviking_sdk().SyncHTTPClient):
     def __init__(self, *args, **kwargs):
@@ -264,6 +294,36 @@ class SyncHTTPClient(import_openviking_sdk().SyncHTTPClient):
                 turn_id=turn_id,
                 message_kind=message_kind,
                 source_message_ids=source_message_ids,
+            )
+        )
+
+    def build_wiki(
+        self,
+        resource_uris: list[str],
+        wiki_root_uri: str = "viking://wiki/",
+        card_input_mode: str = "summary",
+        max_card_input_chars: int = 20000,
+        telemetry: Any = False,
+    ) -> Dict[str, Any]:
+        return run_async(
+            self._async_client.build_wiki(
+                resource_uris=resource_uris,
+                wiki_root_uri=wiki_root_uri,
+                card_input_mode=card_input_mode,
+                max_card_input_chars=max_card_input_chars,
+                telemetry=telemetry,
+            )
+        )
+
+    def clear_wiki(
+        self,
+        wiki_root_uri: str = "viking://wiki/",
+        telemetry: Any = False,
+    ) -> Dict[str, Any]:
+        return run_async(
+            self._async_client.clear_wiki(
+                wiki_root_uri=wiki_root_uri,
+                telemetry=telemetry,
             )
         )
 

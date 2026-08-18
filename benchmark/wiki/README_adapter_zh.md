@@ -5,7 +5,7 @@
 主流程 README 负责教你跑通现有 `qasper_30` 示例；本文只关注两件事：
 
 1. 新数据集应该整理成什么结构。
-2. 新 adapter 应该实现哪些方法，才能适配 `import -> gen -> eval` 流程。
+2. 新 adapter 应该实现哪些方法，才能适配 `import -> build_wiki -> gen -> eval` 流程。
 
 ## 接入前提
 
@@ -321,7 +321,7 @@ llm:
 
 - `max_queries: 2`
 - `max_workers: 1`
-- `build_wiki: true`
+- `build_wiki: true`，用于 `--step all` 时在入库后自动继续生成 Wiki
 - `wiki_card_input_mode: "summary"`
 
 先跑通小样本，再扩大规模。
@@ -395,16 +395,25 @@ uv run python benchmark/wiki/run.py \
 
 ```bash
 ls benchmark/wiki/wiki_storage/my_dataset
+cat benchmark/wiki/Output/my_dataset/wiki/imported_resources.json
 ```
 
-如果配置里 `build_wiki: true`，还要确认 Wiki 产物存在：
+如需生成 Wiki，再单独执行：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/my_dataset.yaml \
+  --step build_wiki
+```
+
+确认 Wiki 产物存在：
 
 ```bash
 find benchmark/wiki/wiki_storage/my_dataset/my_dataset_viking_store_index/viking/default/wiki \
   -maxdepth 3 -type f
 ```
 
-### 5. 复用入库，只跑生成和评测
+### 5. 复用入库和 Wiki，只跑生成和评测
 
 ```bash
 uv run python benchmark/wiki/run.py \

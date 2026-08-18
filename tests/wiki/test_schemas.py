@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from openviking.wiki_mvp.schemas import (
+from openviking.wiki.schemas import (
     DocumentCard,
     EvidenceAnchor,
     WikiBottomNodeDiscoveryResponse,

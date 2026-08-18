@@ -142,7 +142,7 @@ async def _complete_with_validation_retry(
             if attempt == MAX_VALIDATION_ATTEMPTS:
                 break
             logger.info(
-                "[WikiMVP] Retrying %s for node_id=%s after validation failure attempt=%d/%d",
+                "[Wiki] Retrying %s for node_id=%s after validation failure attempt=%d/%d",
                 step,
                 node_id,
                 attempt,

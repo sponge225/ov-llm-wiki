@@ -39,6 +39,7 @@ from openviking.utils.agfs_utils import (
 )
 from openviking.utils.resource_processor import ResourceProcessor
 from openviking.utils.skill_processor import SkillProcessor
+from openviking.wiki.service import WikiService
 from openviking_cli.exceptions import InvalidArgumentError, NotInitializedError
 from openviking_cli.session.user_id import UserIdentifier
 from openviking_cli.utils import get_logger
@@ -105,6 +106,7 @@ class OpenVikingService:
         self._resource_service = ResourceService()
         self._session_service = SessionService()
         self._debug_service = DebugService()
+        self._wiki_service = WikiService()
 
         # State
         self._initialized = False
@@ -278,6 +280,11 @@ class OpenVikingService:
         return self._resource_service
 
     @property
+    def wiki(self) -> WikiService:
+        """Get WikiService instance."""
+        return self._wiki_service
+
+    @property
     def sessions(self) -> SessionService:
         """Get SessionService instance."""
         return self._session_service
@@ -409,6 +416,10 @@ class OpenVikingService:
             skill_processor=self._skill_processor,
             watch_scheduler=self._watch_scheduler,
             resource_memory_link_service=self._resource_memory_link_service,
+        )
+        self._wiki_service.set_dependencies(
+            vikingdb=self._vikingdb_manager,
+            viking_fs=self._viking_fs,
         )
         self._session_service.set_dependencies(
             vikingdb=self._vikingdb_manager,

@@ -1,4 +1,4 @@
-"""Service-local client adapter for Wiki MVP writers."""
+"""Service-local client adapter for Wiki writers."""
 
 from __future__ import annotations
 

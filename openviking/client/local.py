@@ -137,9 +137,6 @@ class LocalClient(BaseClient):
         summarize: bool = False,
         telemetry: TelemetryRequest = False,
         watch_interval: float = 0,
-        build_wiki: bool = False,
-        wiki_card_input_mode: str = "summary",
-        wiki_max_card_input_chars: int = 20000,
         args: Optional[Dict[str, Any]] = None,
         **kwargs,
     ) -> Dict[str, Any]:
@@ -162,9 +159,6 @@ class LocalClient(BaseClient):
                 build_index=build_index,
                 summarize=summarize,
                 watch_interval=watch_interval,
-                build_wiki=build_wiki,
-                wiki_card_input_mode=wiki_card_input_mode,
-                wiki_max_card_input_chars=wiki_max_card_input_chars,
                 args=args,
                 **kwargs,
             ),
@@ -173,6 +167,44 @@ class LocalClient(BaseClient):
             execution.result,
             execution.telemetry,
         )
+
+    async def build_wiki(
+        self,
+        resource_uris: List[str],
+        wiki_root_uri: str = "viking://wiki/",
+        card_input_mode: str = "summary",
+        max_card_input_chars: int = 20000,
+        telemetry: TelemetryRequest = False,
+    ) -> Dict[str, Any]:
+        """Build Wiki from existing resources."""
+        execution = await run_with_telemetry(
+            operation="wiki.build",
+            telemetry=telemetry,
+            fn=lambda: self._service.wiki.build_wiki(
+                resource_uris=resource_uris,
+                ctx=self._ctx,
+                wiki_root_uri=wiki_root_uri,
+                card_input_mode=card_input_mode,
+                max_card_input_chars=max_card_input_chars,
+            ),
+        )
+        return attach_telemetry_payload(execution.result, execution.telemetry)
+
+    async def clear_wiki(
+        self,
+        wiki_root_uri: str = "viking://wiki/",
+        telemetry: TelemetryRequest = False,
+    ) -> Dict[str, Any]:
+        """Clear generated Wiki assets."""
+        execution = await run_with_telemetry(
+            operation="wiki.clear",
+            telemetry=telemetry,
+            fn=lambda: self._service.wiki.clear_wiki(
+                ctx=self._ctx,
+                wiki_root_uri=wiki_root_uri,
+            ),
+        )
+        return attach_telemetry_payload(execution.result, execution.telemetry)
 
     async def add_skill(
         self,

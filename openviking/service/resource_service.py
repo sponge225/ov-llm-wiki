@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import uuid4
 
 import httpx
@@ -710,9 +710,6 @@ class ResourceService:
         build_index: bool = True,
         summarize: bool = False,
         watch_interval: float = 0,
-        build_wiki: bool = False,
-        wiki_card_input_mode: Literal["summary", "raw_chunk"] = "summary",
-        wiki_max_card_input_chars: int = 20000,
         allow_local_path_resolution: bool = True,
         enforce_public_remote_targets: bool = False,
         args: Optional[Dict[str, Any]] = None,
@@ -737,9 +734,6 @@ class ResourceService:
             build_index=build_index,
             summarize=summarize,
             watch_interval=watch_interval,
-            build_wiki=build_wiki,
-            wiki_card_input_mode=wiki_card_input_mode,
-            wiki_max_card_input_chars=wiki_max_card_input_chars,
             manage_watch=True,
             allow_local_path_resolution=allow_local_path_resolution,
             enforce_public_remote_targets=enforce_public_remote_targets,
@@ -796,9 +790,6 @@ class ResourceService:
         build_index: bool = True,
         summarize: bool = False,
         watch_interval: float = 0,
-        build_wiki: bool = False,
-        wiki_card_input_mode: Literal["summary", "raw_chunk"] = "summary",
-        wiki_max_card_input_chars: int = 20000,
         manage_watch: bool = True,
         allow_local_path_resolution: bool = True,
         enforce_public_remote_targets: bool = False,
@@ -841,17 +832,6 @@ class ResourceService:
             InvalidArgumentError: If the URI scope is not 'resources'
         """
         self._ensure_initialized()
-        if build_wiki:
-            if not wait:
-                raise InvalidArgumentError("build_wiki=True requires wait=True")
-            if watch_interval > 0:
-                raise InvalidArgumentError("build_wiki=True does not support watch_interval > 0")
-            if wiki_card_input_mode not in {"summary", "raw_chunk"}:
-                raise InvalidArgumentError(
-                    "wiki_card_input_mode must be either 'summary' or 'raw_chunk'"
-                )
-            if int(wiki_max_card_input_chars or 0) <= 0:
-                raise InvalidArgumentError("wiki_max_card_input_chars must be positive")
         normalized_args = self._normalize_add_resource_args(args, watch_interval=watch_interval)
         kwargs.update(normalized_args.processor_kwargs)
         if watch_interval > 0 and kwargs.get("temp_file_id"):
@@ -891,8 +871,6 @@ class ResourceService:
             connector_args=args or {},
             kwargs=kwargs,
         ):
-            if build_wiki:
-                raise InvalidArgumentError("build_wiki=True does not support connector ingestion")
             return await self._add_resource_via_connector(
                 path=path,
                 ctx=ctx,
@@ -932,9 +910,6 @@ class ResourceService:
             build_index=build_index,
             summarize=summarize,
             watch_interval=watch_interval,
-            build_wiki=build_wiki,
-            wiki_card_input_mode=wiki_card_input_mode,
-            wiki_max_card_input_chars=wiki_max_card_input_chars,
             manage_watch=manage_watch,
             allow_local_path_resolution=allow_local_path_resolution,
             enforce_public_remote_targets=enforce_public_remote_targets,
@@ -956,9 +931,6 @@ class ResourceService:
         build_index: bool = True,
         summarize: bool = False,
         watch_interval: float = 0,
-        build_wiki: bool = False,
-        wiki_card_input_mode: Literal["summary", "raw_chunk"] = "summary",
-        wiki_max_card_input_chars: int = 20000,
         manage_watch: bool = True,
         allow_local_path_resolution: bool = True,
         enforce_public_remote_targets: bool = False,
@@ -985,7 +957,6 @@ class ResourceService:
         telemetry.set("resource.flags.build_index", build_index)
         telemetry.set("resource.flags.summarize", summarize)
         telemetry.set("resource.flags.watch_enabled", watch_enabled)
-        telemetry.set("resource.flags.build_wiki", build_wiki)
 
         prepared_resource: Optional["LocalResource"] = None
         try:
@@ -1200,7 +1171,6 @@ class ResourceService:
                 parent=target.parent,
                 build_index=build_index,
                 summarize=summarize,
-                build_wiki=build_wiki,
                 stage_callback=stage_callback,
                 allow_local_path_resolution=allow_local_path_resolution,
                 prepared_resource=prepared_resource,
@@ -1211,7 +1181,6 @@ class ResourceService:
 
             if result.get("status") == "error":
                 return result
-            wiki_inputs = result.pop("_wiki_resource_inputs", [])
             prepared = result.pop("_post_process", None)
             deferred_lock = result.pop("_resource_lock", NO_LOCK)
             if wait:
@@ -1261,17 +1230,6 @@ class ResourceService:
                     root_uri=result.get("root_uri"),
                 )
                 telemetry.set("queue.wait.duration_ms", queue_wait_duration_ms)
-                if build_wiki:
-                    if stage_callback is not None:
-                        stage_result = stage_callback("building_wiki")
-                        if inspect.isawaitable(stage_result):
-                            await stage_result
-                    result["wiki"] = await self._run_add_resource_wiki_pipeline(
-                        wiki_inputs=wiki_inputs,
-                        ctx=ctx,
-                        card_input_mode=wiki_card_input_mode,
-                        max_card_input_chars=wiki_max_card_input_chars,
-                    )
             if not wait:
                 from openviking.storage.queuefs.add_resource_msg import AddResourceMsg
 
@@ -1357,75 +1315,6 @@ class ResourceService:
                 unregister_wait_telemetry(telemetry_id)
             if deferred_lock.active:
                 await deferred_lock.close()
-
-    async def _run_add_resource_wiki_pipeline(
-        self,
-        *,
-        wiki_inputs: list[Any],
-        ctx: RequestContext,
-        card_input_mode: Literal["summary", "raw_chunk"],
-        max_card_input_chars: int,
-    ) -> Dict[str, Any]:
-        if not wiki_inputs:
-            raise RuntimeError("build_wiki=True produced no Wiki resource inputs")
-        if self._viking_fs is None or self._vikingdb is None:
-            raise NotInitializedError("VikingFS/VikingDB")
-
-        from openviking.wiki_mvp.client_adapter import WikiServiceClientAdapter
-        from openviking.wiki_mvp.content_loader import WikiContentLoader
-        from openviking.wiki_mvp.pipeline import WikiMVPPipeline
-        from openviking_cli.utils.config import get_openviking_config
-
-        adapter = WikiServiceClientAdapter(self._viking_fs, self._vikingdb, ctx)
-        loader = WikiContentLoader(self._viking_fs, self._vikingdb, ctx)
-        wiki_config = None
-        vlm_config = getattr(get_openviking_config(), "vlm", None)
-        from openviking.wiki_mvp.config import WikiMVPConfig
-
-        root_uri = str(
-            (wiki_inputs[0].metadata or {}).get("root_uri")
-            or wiki_inputs[0].document_dir_uri
-            or wiki_inputs[0].resource_uri
-        )
-        wiki_root_uri = "viking://wiki/"
-        logger.info(
-            "[ResourceService] Starting Wiki build root_uri=%s wiki_root_uri=%s docs=%d card_input_mode=%s",
-            root_uri,
-            wiki_root_uri,
-            len(wiki_inputs),
-            card_input_mode,
-        )
-        if vlm_config is not None:
-            wiki_config = WikiMVPConfig(
-                wiki_root_uri=wiki_root_uri,
-                resource_root_uri=root_uri,
-                vlm_config=vlm_config._build_vlm_config_dict(),
-            )
-        else:
-            wiki_config = WikiMVPConfig(wiki_root_uri=wiki_root_uri, resource_root_uri=root_uri)
-        pipeline = WikiMVPPipeline(adapter, config=wiki_config)
-        artifacts = await pipeline.run_from_inputs(
-            wiki_inputs,
-            content_loader=loader,
-            card_input_mode=card_input_mode,
-            max_card_input_chars=max_card_input_chars,
-        )
-        logger.info(
-            "[ResourceService] Finished Wiki build wiki_root_uri=%s cards=%d nodes=%d contexts=%d",
-            wiki_root_uri,
-            len(artifacts.cards),
-            len(artifacts.nodes),
-            len(artifacts.node_contexts),
-        )
-        return {
-            "status": "success",
-            "docs": len(wiki_inputs),
-            "cards": len(artifacts.cards),
-            "nodes": len(artifacts.nodes),
-            "node_contexts": len(artifacts.node_contexts),
-            "card_input_mode": card_input_mode,
-            "wiki_root_uri": wiki_root_uri,
-        }
 
     async def _link_resource_reason_memory(
         self,
