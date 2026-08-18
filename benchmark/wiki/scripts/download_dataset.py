@@ -71,6 +71,10 @@ DATASET_SOURCES = {
         "document_scope": "all",
         "files": ["summary_corpus_1.jsonl", "documents.jsonl", "pdfs/"],
     },
+    "MDAQAFirst100": {
+        "source_type": "mdaqa_first_100",
+        "files": ["MDA-QA.json", "documents.jsonl", "pdfs/"],
+    },
 }
 
 
@@ -198,6 +202,19 @@ def verify_dataset(dataset_name: str, dataset_dir: Path) -> bool:
             print(f"PaperScope download verification failed: {dataset_dir}")
         return valid
 
+    if source.get("source_type") == "mdaqa_first_100":
+        try:
+            from .mdaqa import verify_mdaqa_download
+        except ImportError:
+            from mdaqa import verify_mdaqa_download
+
+        valid = verify_mdaqa_download(dataset_dir)
+        if valid:
+            print(f"✓ {dataset_name} verified successfully")
+        else:
+            print(f"MDA-QA download verification failed: {dataset_dir}")
+        return valid
+
     missing_files = []
 
     for file_path in source["files"]:
@@ -306,6 +323,19 @@ def download_dataset(
             output_dir=output_dir,
             dataset_name=dataset_name,
             document_scope=source["document_scope"],
+            force=force,
+            verify=verify,
+        )
+
+    if source.get("source_type") == "mdaqa_first_100":
+        try:
+            from .mdaqa import download_mdaqa_first_100
+        except ImportError:
+            from mdaqa import download_mdaqa_first_100
+
+        return download_mdaqa_first_100(
+            output_dir=output_dir,
+            dataset_name=dataset_name,
             force=force,
             verify=verify,
         )

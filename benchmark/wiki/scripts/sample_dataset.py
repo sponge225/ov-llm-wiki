@@ -1188,6 +1188,27 @@ def sample_paperscope_summary_93(
     )
 
 
+def sample_mdaqa_first_100(
+    input_dir: Path,
+    output_dir: Path,
+    sample_size: Optional[int] = None,
+    num_docs: Optional[int] = None,
+    seed: int = 42,
+    sample_mode: str = "random",
+) -> Dict[str, Any]:
+    """Prepare the fixed first 100 MDA-QA records and their 143 papers."""
+    if sample_size is not None or num_docs is not None:
+        raise ValueError(
+            "MDAQAFirst100 is a fixed subset and does not accept sampling options"
+        )
+    try:
+        from .mdaqa import prepare_mdaqa_first_100
+    except ImportError:
+        from mdaqa import prepare_mdaqa_first_100
+
+    return prepare_mdaqa_first_100(input_dir, output_dir)
+
+
 DATASET_SAMPLERS = {
     "Locomo": sample_locomo,
     "SyllabusQA": sample_syllabusqa,
@@ -1195,6 +1216,7 @@ DATASET_SAMPLERS = {
     "FinanceBench": sample_financebench,
     "PaperScopeSummary57": sample_paperscope_summary_57,
     "PaperScopeSummary93": sample_paperscope_summary_93,
+    "MDAQAFirst100": sample_mdaqa_first_100,
 }
 
 

@@ -661,6 +661,37 @@ tail -f benchmark/wiki/.temp/openviking-server.log
 
 ## 常用命令速查
 
+### MDA-QA：前 100 条 QA
+
+`MDAQAFirst100` 固定选择 MDA-QA 数据快照中的前 100 条记录（`id=0～99`），并只下载这些问题的 `support` 字段引用的 143 篇 arXiv PDF。QA 文件固定到 Hugging Face revision `7c4a4c374e3ff8298e9694648e0d793197a30814`，避免上游更新改变实验子集。实验语料采用 arXiv PDF 经 OpenViking 解析后的全文，不使用 SPIQA 预提取段落。
+
+下载并准备数据：
+
+```bash
+uv run python benchmark/wiki/scripts/prepare_dataset.py \
+  --dataset MDAQAFirst100 \
+  --download-dir benchmark/wiki/raw_data \
+  --output-dir benchmark/wiki/datasets
+```
+
+PDF 会缓存在 `benchmark/wiki/raw_data/MDAQA/pdf_cache/`。下载器串行访问 arXiv，并在 manifest 中记录每篇 PDF 的 SHA-256；再次运行时会复用已经验证的文件。
+
+构建 143 篇论文的资源库和 Wiki：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/MDAQA/mdaqa_first_100.yaml \
+  --step import
+```
+
+执行全部 100 条 QA 并评测：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/MDAQA/mdaqa_first_100.yaml \
+  --step gen+eval
+```
+
 ### PaperScope Summary：全部有效 QA
 
 PaperScope Summary 提供两种文档范围，但两者评测的是同一批 352 条有效 QA：
