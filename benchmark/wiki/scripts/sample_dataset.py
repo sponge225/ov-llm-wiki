@@ -1146,11 +1146,55 @@ def sample_financebench(
     return metadata
 
 
+def sample_paperscope_summary_57(
+    input_dir: Path,
+    output_dir: Path,
+    sample_size: Optional[int] = None,
+    num_docs: Optional[int] = None,
+    seed: int = 42,
+    sample_mode: str = "random",
+) -> Dict[str, Any]:
+    """Prepare all valid PaperScope Summary QA with the 57-paper corpus."""
+    if sample_size is not None or num_docs is not None:
+        raise ValueError("PaperScopeSummary57 only supports the full valid QA set")
+    try:
+        from .paperscope_summary import prepare_paperscope_summary
+    except ImportError:
+        from paperscope_summary import prepare_paperscope_summary
+
+    return prepare_paperscope_summary(
+        input_dir, output_dir, document_scope="valid"
+    )
+
+
+def sample_paperscope_summary_93(
+    input_dir: Path,
+    output_dir: Path,
+    sample_size: Optional[int] = None,
+    num_docs: Optional[int] = None,
+    seed: int = 42,
+    sample_mode: str = "random",
+) -> Dict[str, Any]:
+    """Prepare all valid PaperScope Summary QA with the 93-paper corpus."""
+    if sample_size is not None or num_docs is not None:
+        raise ValueError("PaperScopeSummary93 only supports the full valid QA set")
+    try:
+        from .paperscope_summary import prepare_paperscope_summary
+    except ImportError:
+        from paperscope_summary import prepare_paperscope_summary
+
+    return prepare_paperscope_summary(
+        input_dir, output_dir, document_scope="all"
+    )
+
+
 DATASET_SAMPLERS = {
     "Locomo": sample_locomo,
     "SyllabusQA": sample_syllabusqa,
     "Qasper": sample_qasper,
     "FinanceBench": sample_financebench,
+    "PaperScopeSummary57": sample_paperscope_summary_57,
+    "PaperScopeSummary93": sample_paperscope_summary_93,
 }
 
 

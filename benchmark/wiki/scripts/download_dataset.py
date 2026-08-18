@@ -61,6 +61,16 @@ DATASET_SOURCES = {
         ],
         "extract_subdir": "financebench-main",
     },
+    "PaperScopeSummary57": {
+        "source_type": "paperscope_summary",
+        "document_scope": "valid",
+        "files": ["summary_corpus_1.jsonl", "documents.jsonl", "pdfs/"],
+    },
+    "PaperScopeSummary93": {
+        "source_type": "paperscope_summary",
+        "document_scope": "all",
+        "files": ["summary_corpus_1.jsonl", "documents.jsonl", "pdfs/"],
+    },
 }
 
 
@@ -175,6 +185,19 @@ def verify_dataset(dataset_name: str, dataset_dir: Path) -> bool:
         return False
 
     source = DATASET_SOURCES[dataset_name]
+    if source.get("source_type") == "paperscope_summary":
+        try:
+            from .paperscope_summary import verify_paperscope_download
+        except ImportError:
+            from paperscope_summary import verify_paperscope_download
+
+        valid = verify_paperscope_download(dataset_dir, source["document_scope"])
+        if valid:
+            print(f"✓ {dataset_name} verified successfully")
+        else:
+            print(f"PaperScope download verification failed: {dataset_dir}")
+        return valid
+
     missing_files = []
 
     for file_path in source["files"]:
@@ -272,6 +295,20 @@ def download_dataset(
 
     source = DATASET_SOURCES[dataset_name]
     dataset_dir = output_dir / dataset_name
+
+    if source.get("source_type") == "paperscope_summary":
+        try:
+            from .paperscope_summary import download_paperscope_summary
+        except ImportError:
+            from paperscope_summary import download_paperscope_summary
+
+        return download_paperscope_summary(
+            output_dir=output_dir,
+            dataset_name=dataset_name,
+            document_scope=source["document_scope"],
+            force=force,
+            verify=verify,
+        )
 
     if dataset_dir.exists() and not force:
         print(f"{dataset_name} already exists at {dataset_dir}, skipping download")

@@ -661,6 +661,51 @@ tail -f benchmark/wiki/.temp/openviking-server.log
 
 ## 常用命令速查
 
+### PaperScope Summary：全部有效 QA
+
+PaperScope Summary 提供两种文档范围，但两者评测的是同一批 352 条有效 QA：
+
+- `PaperScopeSummary57`：只准备有效 QA 引用的 57 篇论文。
+- `PaperScopeSummary93`：准备原始 600 条 Summary 记录引用的全部 93 篇论文；额外 36 篇作为检索干扰文档。
+
+准备 57 篇版本：
+
+```bash
+uv run python benchmark/wiki/scripts/prepare_dataset.py \
+  --dataset PaperScopeSummary57 \
+  --download-dir benchmark/wiki/raw_data \
+  --output-dir benchmark/wiki/datasets
+```
+
+准备 93 篇版本：
+
+```bash
+uv run python benchmark/wiki/scripts/prepare_dataset.py \
+  --dataset PaperScopeSummary93 \
+  --download-dir benchmark/wiki/raw_data \
+  --output-dir benchmark/wiki/datasets
+```
+
+PDF 使用共享缓存。因此先准备 57 篇、再准备 93 篇时，只需下载新增论文。若 OpenReview 要求登录，脚本会交互式读取邮箱和隐藏密码，不会保存凭据。
+
+每个文档范围只需入库一次。例如先构建 57 篇资源库和 Wiki：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/PaperScope_summary/paperscope_summary_57_trend.yaml \
+  --step import
+```
+
+然后三种问题类型复用同一个 57 篇向量库：
+
+```bash
+uv run python benchmark/wiki/run.py --config benchmark/wiki/config/PaperScope_summary/paperscope_summary_57_trend.yaml --step gen+eval
+uv run python benchmark/wiki/run.py --config benchmark/wiki/config/PaperScope_summary/paperscope_summary_57_gap.yaml --step gen+eval
+uv run python benchmark/wiki/run.py --config benchmark/wiki/config/PaperScope_summary/paperscope_summary_57_results_comparison.yaml --step gen+eval
+```
+
+93 篇版本使用 `config/PaperScope_summary/` 下对应的 `paperscope_summary_93_*.yaml`，运行顺序相同。
+
 下载并生成 Qasper 示例数据：
 
 ```bash
