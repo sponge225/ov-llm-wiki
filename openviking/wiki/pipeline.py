@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import asdict
-from datetime import datetime, timezone
-from typing import Any
 
 from .assignments import SourceRefBuilder
 from .cards import DocumentCardGenerator
@@ -16,28 +14,22 @@ from .documents import NodeContentGenerator
 from .layer_decision import LayerDecisionRunner
 from .llm import WikiLLMRunner
 from .nodes import NodeDiscoveryRunner
-from .profile import ResourceSpaceProfiler
 from .schemas import (
     DocumentCard,
     GeneratedNodeContext,
-    NodeManifest,
     PipelineArtifacts,
     ResourceDocument,
     SourceAssignmentResult,
     SourceRef,
     WikiResourceInput,
-    WikiManifest,
     WikiNode,
 )
 from .uri import (
     card_md_uri,
     cards_dir,
     node_document_uri,
-    node_documents_dir,
     node_md_uri,
-    node_root_uri,
     node_sources_dir,
-    profile_uri,
     run_dir,
     wiki_root,
 )
@@ -50,18 +42,17 @@ logger = logging.getLogger(__name__)
 class WikiPipeline:
     def __init__(
         self,
-        client: Any,
+        writer: WikiVikingFSWriter,
         config: WikiConfig | None = None,
         llm: WikiLLMRunner | None = None,
     ):
         self.config = config or WikiConfig()
         self.llm = llm or WikiLLMRunner(vlm_config=self.config.vlm_config)
-        self.writer = WikiVikingFSWriter(client, self.config)
+        self.writer = writer
         self.card_generator = DocumentCardGenerator(
             self.llm,
             max_concurrent=self.config.limits.max_concurrent_cards,
         )
-        self.profiler = ResourceSpaceProfiler(self.llm)
         self.node_discovery = NodeDiscoveryRunner(self.llm, self.config)
         self.source_ref_builder = SourceRefBuilder(self.config)
         self.content_generator = NodeContentGenerator(self.llm)
@@ -131,15 +122,9 @@ class WikiPipeline:
         artifacts.cards = cards
         await self._write_cards(cards)
 
-        logger.info("[Wiki] Generating resource-space profile")
-        profile = await self.profiler.generate(cards)
-        artifacts.profile = profile
-        await self.writer.write_json(profile_uri(self.config), profile)
-        logger.info("[Wiki] Resource-space profile generated")
-
         all_nodes: list[WikiNode] = []
         all_source_refs_by_node: dict[str, list[SourceRef]] = {}
-        all_unassigned_doc_ids: list[str] = []
+        all_unassigned_source_ids: list[str] = []
         all_contexts: list[GeneratedNodeContext] = []
         previous_layer_contexts: list[GeneratedNodeContext] = []
 
@@ -183,7 +168,7 @@ class WikiPipeline:
                         bottom_discovery.source_assignments.assignments,
                         cards,
                     ),
-                    unassigned_doc_ids=bottom_discovery.source_assignments.unassigned_doc_ids,
+                    unassigned_source_ids=bottom_discovery.source_assignments.unassigned_source_ids,
                 )
             else:
                 logger.info(
@@ -200,7 +185,7 @@ class WikiPipeline:
                         source_contexts,
                     ),
                     child_node_ids_by_node=child_node_ids_by_node,
-                    unassigned_doc_ids=parent_discovery.source_assignments.unassigned_doc_ids,
+                    unassigned_source_ids=parent_discovery.source_assignments.unassigned_source_ids,
                 )
             logger.info(
                 "[Wiki] Depth=%d produced %d source refs",
@@ -231,13 +216,13 @@ class WikiPipeline:
             await self.writer.write_json(f"{wiki_root(self.config)}nodes.json", {"nodes": all_nodes})
 
             all_source_refs_by_node.update(assignment_result.source_refs_by_node)
-            all_unassigned_doc_ids.extend(assignment_result.unassigned_doc_ids)
+            all_unassigned_source_ids.extend(assignment_result.unassigned_source_ids)
             artifacts.source_refs_by_node = all_source_refs_by_node
             await self.writer.write_json(
                 f"{wiki_root(self.config)}source_assignments.json",
                 {
                     "source_refs_by_node": all_source_refs_by_node,
-                    "unassigned_doc_ids": all_unassigned_doc_ids,
+                    "unassigned_source_ids": all_unassigned_source_ids,
                 },
             )
 
@@ -262,7 +247,6 @@ class WikiPipeline:
                 break
 
             continue_upward = await self.layer_decision_runner.should_continue_upward(
-                profile,
                 layer_contexts,
                 min_child_nodes_per_parent=self.config.limits.min_child_nodes_per_parent,
             )
@@ -271,7 +255,6 @@ class WikiPipeline:
                 break
             previous_layer_contexts = layer_contexts
 
-        artifacts.manifest = await self._write_manifest(all_contexts)
         await self._write_run_records()
         logger.info(
             "[Wiki] Completed wiki generation: cards=%d nodes=%d contexts=%d wiki_root=%s",
@@ -366,7 +349,6 @@ class WikiPipeline:
             documents=documents,
             source_refs=source_refs,
         )
-        await self._write_node_manifest(context)
         return context
 
     async def _write_cards(self, cards: list[DocumentCard]) -> None:
@@ -380,37 +362,6 @@ class WikiPipeline:
                 f"{node_sources_dir(self.config, node.node_id)}{source_ref.doc_id}.ref.json",
                 source_ref,
             )
-
-    async def _write_node_manifest(self, context: GeneratedNodeContext) -> None:
-        node = context.node
-        manifest = NodeManifest(
-            node_id=node.node_id,
-            title=node.title,
-            node_uri=node_root_uri(self.config, node.node_id),
-            node_md=node_md_uri(self.config, node.node_id),
-            documents_dir=node_documents_dir(self.config, node.node_id),
-            document_uris=[
-                node_document_uri(self.config, node.node_id, document.document_id)
-                for document in context.documents
-            ],
-            sources_dir=node_sources_dir(self.config, node.node_id),
-            num_source_refs=len(context.source_refs),
-            num_node_documents=len(context.documents),
-        )
-        await self.writer.write_json(f"{node_root_uri(self.config, node.node_id)}manifest.json", manifest)
-
-    async def _write_manifest(self, contexts: list[GeneratedNodeContext]) -> WikiManifest:
-        manifest = WikiManifest(
-            pipeline_version=self.config.pipeline_version,
-            resource_root_uri=self.config.resource_root_uri,
-            wiki_root=wiki_root(self.config),
-            profile_uri=profile_uri(self.config),
-            cards_dir=cards_dir(self.config),
-            node_uris=[node_root_uri(self.config, context.node.node_id) for context in contexts],
-            created_at=datetime.now(timezone.utc).isoformat(),
-        )
-        await self.writer.write_json(f"{wiki_root(self.config)}manifest.json", manifest)
-        return manifest
 
     async def _write_run_records(self) -> None:
         run_root = run_dir(self.config)

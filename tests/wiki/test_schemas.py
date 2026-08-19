@@ -3,7 +3,6 @@ from pydantic import ValidationError
 
 from openviking.wiki.schemas import (
     DocumentCard,
-    EvidenceAnchor,
     WikiBottomNodeDiscoveryResponse,
     WikiNode,
     WikiParentNodeDiscoveryResponse,
@@ -16,11 +15,9 @@ def test_document_card_requires_candidate_topics():
             doc_id="OARW_1",
             resource_uri="viking://resources/OARW_1/",
             title="Title",
-            source_type="academic_paper_full_text",
             summary="Summary",
             main_points=["Point"],
             candidate_topics=[],
-            evidence_anchors=[EvidenceAnchor(section_title="Intro", section_uri="viking://resources/OARW_1/intro")],
         )
 
 

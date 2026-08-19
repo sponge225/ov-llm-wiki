@@ -7,10 +7,6 @@ metadata:
   category: "wiki"
 
 variables:
-  - name: "boundary"
-    type: "string"
-    description: "Wiki data boundary instruction"
-    required: true
   - name: "input_json"
     type: "string"
     description: "JSON encoded child node records"
@@ -18,8 +14,6 @@ variables:
 
 template: |
   Aggregate child Wiki nodes into parent-layer Wiki nodes.
-
-  {{ boundary }}
 
   Each output parent node must represent a higher-level knowledge topic supported by multiple child nodes.
 

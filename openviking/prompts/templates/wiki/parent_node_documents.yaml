@@ -7,10 +7,6 @@ metadata:
   category: "wiki"
 
 variables:
-  - name: "boundary"
-    type: "string"
-    description: "Wiki data boundary instruction"
-    required: true
   - name: "input_json"
     type: "string"
     description: "JSON encoded parent node and child node documents"
@@ -18,8 +14,6 @@ variables:
 
 template: |
   Write the Markdown content for the parent Wiki node using only the provided child node document contents.
-
-  {{ boundary }}
 
   ## Input shape
   The input JSON contains two parts:

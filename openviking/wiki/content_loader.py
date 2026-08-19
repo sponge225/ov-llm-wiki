@@ -5,8 +5,6 @@ from __future__ import annotations
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from openviking_cli.utils.uri import VikingURI
-
 from .schemas import ResourceDocument, WikiResourceInput
 
 if TYPE_CHECKING:
@@ -34,7 +32,6 @@ class WikiContentLoader:
         self.viking_fs = viking_fs
         self.vikingdb = vikingdb
         self.ctx = ctx
-        self._overview_cache: dict[str, dict[str, str]] = {}
 
     async def load_document(
         self,
@@ -59,9 +56,6 @@ class WikiContentLoader:
             doc_id=doc.doc_id,
             resource_uri=doc.resource_uri,
             title=doc.title,
-            source_type=doc.source_type,
-            summary=doc.summary,
-            abstract=doc.abstract,
             content_or_structure=content,
             metadata={
                 **doc.metadata,
@@ -80,17 +74,6 @@ class WikiContentLoader:
 
         async def visit(uri: str, title_path: list[str]) -> None:
             if await self._is_directory(uri):
-                abstract = await self._safe_abstract(uri)
-                overview = await self._safe_overview(uri)
-                if abstract or overview:
-                    entries.append(
-                        {
-                            "kind": "directory",
-                            "uri": uri,
-                            "title_path": list(title_path),
-                            "text": overview or abstract,
-                        }
-                    )
                 for child in await self._list_children(uri):
                     name = str(child.get("name") or "").strip()
                     if not name or name in {".", ".."}:
@@ -154,49 +137,25 @@ class WikiContentLoader:
             abstract = str(records[0].get("abstract") or "").strip()
             if abstract:
                 return abstract
-        parent_uri = VikingURI(uri).parent.uri
-        file_name = uri.rsplit("/", 1)[-1]
-        parsed = await self._parsed_parent_overview(parent_uri)
-        return parsed.get(file_name, "").strip()
-
-    async def _parsed_parent_overview(self, parent_uri: str) -> dict[str, str]:
-        if parent_uri in self._overview_cache:
-            return self._overview_cache[parent_uri]
-        overview = await self._safe_read(f"{parent_uri}/.overview.md")
-        parsed: dict[str, str] = {}
-        current_name: str | None = None
-        current_lines: list[str] = []
-        for line in overview.splitlines():
-            if line.startswith("### "):
-                if current_name is not None:
-                    parsed[current_name] = "\n".join(current_lines).strip()
-                current_name = line[4:].strip().split()[0]
-                current_lines = []
-                continue
-            if current_name is not None:
-                current_lines.append(line)
-        if current_name is not None:
-            parsed[current_name] = "\n".join(current_lines).strip()
-        self._overview_cache[parent_uri] = parsed
-        return parsed
+        return ""
 
     def _render_entries(self, entries: list[dict[str, Any]], *, max_chars: int) -> str:
         if not entries:
             return ""
-        max_chars = max(1000, int(max_chars or 20000))
+        max_chars = max(1000, int(max_chars or 100000))
         rendered = [self._render_entry(entry) for entry in entries]
         joined = "\n\n".join(rendered)
         if len(joined) <= max_chars:
             return joined
 
-        per_entry_budget = max(160, max_chars // max(1, len(rendered)))
+        per_entry_budget = max(600, max_chars // max(1, len(rendered)))
         compacted = [self._clip(text, per_entry_budget) for text in rendered]
         joined = "\n\n".join(compacted)
         if len(joined) <= max_chars:
             return joined
 
         # Preserve coverage over all entries instead of dropping tail entries.
-        per_entry_budget = max(80, (max_chars - len(rendered) * 2) // max(1, len(rendered)))
+        per_entry_budget = max(400, (max_chars - len(rendered) * 2) // max(1, len(rendered)))
         return "\n\n".join(self._clip(text, per_entry_budget) for text in rendered)
 
     @staticmethod
@@ -234,18 +193,6 @@ class WikiContentLoader:
             )
         except Exception:
             return []
-
-    async def _safe_abstract(self, uri: str) -> str:
-        try:
-            return str(await self.viking_fs.abstract(uri, ctx=self.ctx) or "").strip()
-        except Exception:
-            return ""
-
-    async def _safe_overview(self, uri: str) -> str:
-        try:
-            return str(await self.viking_fs.overview(uri, ctx=self.ctx) or "").strip()
-        except Exception:
-            return ""
 
     async def _safe_read(self, uri: str) -> str:
         try:

@@ -7,10 +7,6 @@ metadata:
   category: "wiki"
 
 variables:
-  - name: "boundary"
-    type: "string"
-    description: "Wiki data boundary instruction"
-    required: true
   - name: "input_json"
     type: "string"
     description: "JSON encoded node title and scope"
@@ -18,8 +14,6 @@ variables:
 
 template: |
   Generate node.md for this Wiki node.
-
-  {{ boundary }}
 
   node.md is a directory explanation. It is not the synthesized knowledge body.
 

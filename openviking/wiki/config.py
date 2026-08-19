@@ -8,8 +8,6 @@ from typing import Any
 
 @dataclass
 class WikiGenerationLimits:
-    # 每层最多保留多少个可生成内容的 Wiki 节点。
-    max_active_nodes: int = 20
     # 最多向上聚合多少层 Wiki 节点。
     max_depth: int = 3
     # 父节点至少要覆盖多少个子节点，否则不会保留。

@@ -7,10 +7,6 @@ metadata:
   category: "wiki"
 
 variables:
-  - name: "boundary"
-    type: "string"
-    description: "Wiki data boundary instruction"
-    required: true
   - name: "input_json"
     type: "string"
     description: "JSON encoded document topic records"
@@ -18,8 +14,6 @@ variables:
 
 template: |
   Aggregate document-level candidate topics into bottom-layer Wiki nodes.
-
-  {{ boundary }}
 
   Each output node must represent a reusable knowledge topic supported by multiple documents.
 

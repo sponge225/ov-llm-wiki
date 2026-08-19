@@ -22,7 +22,6 @@ from .test_pipeline_order import _card_response
     ("prompt_id", "extra_vars"),
     [
         ("wiki.document_card", {}),
-        ("wiki.resource_profile", {}),
         ("wiki.bottom_node_discovery", {}),
         ("wiki.parent_node_discovery", {}),
         ("wiki.node_md", {}),
@@ -35,13 +34,11 @@ def test_wiki_prompt_templates_render(prompt_id: str, extra_vars: dict):
     rendered = PromptManager().render(
         prompt_id,
         {
-            "boundary": "Use only provided resources.",
             "input_json": '{"example": true}',
             **extra_vars,
         },
     )
 
-    assert "Use only provided resources." in rendered
     assert '{"example": true}' in rendered
     assert "Return only JSON matching this shape" not in rendered
 
@@ -50,7 +47,7 @@ def test_wiki_prompt_template_requires_input_json():
     with pytest.raises(ValueError, match="input_json"):
         PromptManager().render(
             "wiki.document_card",
-            {"boundary": "Use only provided resources."},
+            {},
         )
 
 
@@ -60,9 +57,6 @@ def test_document_card_prompt_uses_only_semantic_input_fields():
             doc_id="paper_1",
             resource_uri="viking://resources/paper_1/",
             title="Paper 1",
-            source_type="academic_paper_full_text",
-            summary="ignored input summary",
-            abstract="source abstract",
             content_or_structure="semantic content",
             metadata={
                 "card_input_mode": "summary",
@@ -72,11 +66,9 @@ def test_document_card_prompt_uses_only_semantic_input_fields():
         )
     )
 
-    assert '"source_abstract": "source abstract"' in prompt
     assert '"content_or_structure": "semantic content"' in prompt
     assert '"card_input_mode": "summary"' in prompt
     assert "missing_summary_uris" in prompt
-    assert "ignored input summary" not in prompt
     assert "paper_1" not in prompt
     assert "Paper 1" not in prompt
     assert '"doc_id"' not in prompt
@@ -96,7 +88,6 @@ def test_bottom_node_discovery_prompt_uses_only_topic_index_fields():
     assert '"min_refs_per_node": 3' in prompt
     assert '"source_unit_count": 1' in prompt
     assert '"main_points"' not in prompt
-    assert "small test profile" not in prompt
     assert "viking://resources/" not in prompt
 
 

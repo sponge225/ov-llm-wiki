@@ -4,6 +4,7 @@ from openviking.wiki.config import WikiConfig, WikiGenerationLimits
 from openviking.wiki.llm import WikiLLMRunner
 from openviking.wiki.pipeline import WikiPipeline
 from openviking.wiki.schemas import ResourceDocument
+from openviking.wiki.writer import WikiVikingFSWriter
 
 from .fakes import FakeClient, FakeVLM
 
@@ -16,7 +17,6 @@ async def test_pipeline_generates_layer_content_before_next_layer_decision():
             _card_content_response(1),
             _card_content_response(2),
             _card_content_response(3),
-            _profile_response(),
             _node_discovery_response(),
             {"node_md": "# Question Answering\n\n## Scope\n\nQA scope."},
             {
@@ -32,14 +32,21 @@ async def test_pipeline_generates_layer_content_before_next_layer_decision():
     )
     llm = WikiLLMRunner(fake_vlm)
     client = FakeClient()
+    config = WikiConfig()
+    writer = WikiVikingFSWriter(
+        viking_fs=client,
+        vikingdb=object(),
+        ctx=object(),
+        config=config,
+        content_writer=client,
+    )
 
-    artifacts = await WikiPipeline(client=client, config=WikiConfig(), llm=llm).run(docs)
+    artifacts = await WikiPipeline(writer=writer, config=config, llm=llm).run(docs)
 
     assert [record.step for record in llm.log.raw_outputs] == [
         "doc_card",
         "doc_card",
         "doc_card",
-        "profile",
         "bottom_node_discovery",
         "node_md",
         "node_documents",
@@ -58,7 +65,6 @@ async def test_pipeline_does_not_precreate_unassigned_active_node_dirs():
             _card_content_response(1),
             _card_content_response(2),
             _card_content_response(3),
-            _profile_response(),
             {
                 "nodes": [
                     {
@@ -90,8 +96,15 @@ async def test_pipeline_does_not_precreate_unassigned_active_node_dirs():
     llm = WikiLLMRunner(fake_vlm)
     client = FakeClient()
     config = WikiConfig(limits=WikiGenerationLimits(min_refs_per_node=2))
+    writer = WikiVikingFSWriter(
+        viking_fs=client,
+        vikingdb=object(),
+        ctx=object(),
+        config=config,
+        content_writer=client,
+    )
 
-    artifacts = await WikiPipeline(client=client, config=config, llm=llm).run(docs)
+    artifacts = await WikiPipeline(writer=writer, config=config, llm=llm).run(docs)
 
     assert "viking://wiki/nodes/question_answering/" in client.mkdirs
     assert "viking://wiki/nodes/unassigned_topic/" not in client.mkdirs
@@ -106,7 +119,6 @@ def _doc(index: int) -> ResourceDocument:
         doc_id=f"OARW_{index}",
         resource_uri=f"viking://resources/OARW_{index}/",
         title=f"Paper {index}",
-        source_type="academic_paper_full_text",
         content_or_structure=f"# Paper {index}\n\nContent about question answering.",
     )
 
@@ -116,7 +128,6 @@ def _card_response(index: int) -> dict:
         "doc_id": f"OARW_{index}",
         "resource_uri": f"viking://resources/OARW_{index}/",
         "title": f"Paper {index}",
-        "source_type": "academic_paper_full_text",
         **_card_content_response(index),
     }
 
@@ -126,25 +137,7 @@ def _card_content_response(index: int) -> dict:
         "summary": f"Paper {index} discusses question answering.",
         "main_points": ["QA method"],
         "important_terms": ["question answering"],
-        "limitations_or_notes": ["limited evidence"],
         "candidate_topics": ["question answering"],
-        "evidence_anchors": [
-            {
-                "section_title": "Abstract",
-                "section_uri": f"viking://resources/OARW_{index}/abstract",
-                "summary": "QA evidence",
-            }
-        ],
-    }
-
-
-def _profile_response() -> dict:
-    return {
-        "space_title": "Question Answering Research",
-        "space_summary": "The resources discuss QA methods.",
-        "main_topics": ["question answering"],
-        "important_terms": ["QA"],
-        "notes": ["small test profile"],
     }
 
 
