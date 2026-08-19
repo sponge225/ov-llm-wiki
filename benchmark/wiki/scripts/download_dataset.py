@@ -95,6 +95,16 @@ DATASET_SOURCES = {
             "reference_pages/",
         ],
     },
+    "ScholarQAMultiValid101": {
+        "source_type": "scholarqa_multi",
+        "files": [
+            "human_answers.json",
+            "scholarqa_multi_valid_101.json",
+            "documents.jsonl",
+            "dataset_info.json",
+            "reference_documents/",
+        ],
+    },
 }
 
 
@@ -248,6 +258,19 @@ def verify_dataset(dataset_name: str, dataset_dir: Path) -> bool:
             print(f"WildGraphBench download verification failed: {dataset_dir}")
         return valid
 
+    if source.get("source_type") == "scholarqa_multi":
+        try:
+            from .dataset_handlers.scholarqa_multi import verify_scholarqa_multi_download
+        except ImportError:
+            from dataset_handlers.scholarqa_multi import verify_scholarqa_multi_download
+
+        valid = verify_scholarqa_multi_download(dataset_dir)
+        if valid:
+            print(f"✓ {dataset_name} verified successfully")
+        else:
+            print(f"ScholarQA-Multi download verification failed: {dataset_dir}")
+        return valid
+
     missing_files = []
 
     for file_path in source["files"]:
@@ -383,6 +406,23 @@ def download_dataset(
             output_dir=output_dir,
             dataset_name=dataset_name,
             scope=source["scope"],
+            force=force,
+            verify=verify,
+        )
+
+    if source.get("source_type") == "scholarqa_multi":
+        try:
+            from .dataset_handlers.scholarqa_multi import (
+                download_scholarqa_multi_valid_101,
+            )
+        except ImportError:
+            from dataset_handlers.scholarqa_multi import (
+                download_scholarqa_multi_valid_101,
+            )
+
+        return download_scholarqa_multi_valid_101(
+            output_dir=output_dir,
+            dataset_name=dataset_name,
             force=force,
             verify=verify,
         )

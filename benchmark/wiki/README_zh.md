@@ -811,6 +811,39 @@ uv run python benchmark/wiki/run.py \
 
 Adapter 会把每条 QA 的多个 `gold_statements` 合并为一个完整标准答案，以便继续使用项目现有的通用 F1 和 LLM judge；原始陈述列表与 `ref_urls` 仍保留在 QA metadata 中。该结果不是 WildGraphBench 官方陈述级指标。
 
+### ScholarQA-Multi：101 条有效 QA
+
+`ScholarQAMultiValid101` 固定使用 ScholarQABench revision `95e6fc52b0a8a0ce0a74956029991e3bb00c38b9`。原始 ScholarQA-Multi 有 108 条专家 QA；其中 7 条答案含有超出各自 `ctxs` 范围的引用编号，因此固定排除，保留 101 条有效 QA。有效 QA 按 `subject` 形成 6 个 `StandardSample`，但共同检索同一份语料库。
+
+本实验不下载论文 PDF。Adapter 使用官方 `ctxs` 引用片段：优先按 Semantic Scholar Paper URL 合并，没有 URL 时按规范化论文标题合并，最终生成 413 份 TXT 文档。每份 TXT 保存标题、作者、年份、来源 URL，以及去重后的官方引用片段。上游有 2 个被引用来源的 `text` 为 `NaN`；对应 TXT 仅保留可用的文献元数据，不伪造片段，也不把 `NaN` 加入 QA evidence。
+
+下载并准备数据：
+
+```bash
+uv run python benchmark/wiki/scripts/prepare_dataset.py \
+  --dataset ScholarQAMultiValid101 \
+  --download-dir benchmark/wiki/raw_data \
+  --output-dir benchmark/wiki/datasets
+```
+
+导入 413 份引用片段文档、构建 Wiki、运行 101 条 QA 并评测：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/ScholarQABench/scholarqa_multi_valid_101.yaml \
+  --step import
+
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/ScholarQABench/scholarqa_multi_valid_101.yaml \
+  --step build_wiki
+
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/ScholarQABench/scholarqa_multi_valid_101.yaml \
+  --step gen+eval
+```
+
+每个 `gold_answers` 只保存一个答案：原始专家答案后附零基引用编号到论文标题的对照表，以消除 `[0]`、`[1]` 等标签的指代歧义。原始专家答案、完整 `ctxs` 和引用映射也保留在 QA metadata 中。实验继续使用项目现有通用评价指标，不启用 ScholarQABench 官方 Prometheus 或引用正确性指标。
+
 下载并生成 Qasper 示例数据：
 
 ```bash

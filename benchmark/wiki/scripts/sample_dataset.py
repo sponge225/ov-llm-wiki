@@ -1265,6 +1265,31 @@ def sample_wildgraphbench_summary_health(
     )
 
 
+def sample_scholarqa_multi_valid_101(
+    input_dir: Path,
+    output_dir: Path,
+    sample_size: Optional[int] = None,
+    num_docs: Optional[int] = None,
+    seed: int = 42,
+    sample_mode: str = "random",
+) -> Dict[str, Any]:
+    """Prepare the fixed ScholarQA-Multi valid subset and merged snippet corpus."""
+    if sample_size is not None or num_docs is not None:
+        raise ValueError(
+            "ScholarQAMultiValid101 is a fixed subset and does not accept sampling options"
+        )
+    try:
+        from .dataset_handlers.scholarqa_multi import (
+            prepare_scholarqa_multi_valid_101,
+        )
+    except ImportError:
+        from dataset_handlers.scholarqa_multi import (
+            prepare_scholarqa_multi_valid_101,
+        )
+
+    return prepare_scholarqa_multi_valid_101(input_dir, output_dir)
+
+
 DATASET_SAMPLERS = {
     "Locomo": sample_locomo,
     "SyllabusQA": sample_syllabusqa,
@@ -1275,6 +1300,7 @@ DATASET_SAMPLERS = {
     "MDAQAFirst100": sample_mdaqa_first_100,
     "WildGraphBenchSummaryAll": sample_wildgraphbench_summary_all,
     "WildGraphBenchSummaryHealth": sample_wildgraphbench_summary_health,
+    "ScholarQAMultiValid101": sample_scholarqa_multi_valid_101,
 }
 
 
