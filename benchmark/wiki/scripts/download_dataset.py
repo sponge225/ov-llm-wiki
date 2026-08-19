@@ -105,6 +105,16 @@ DATASET_SOURCES = {
             "reference_documents/",
         ],
     },
+    "MuDABenchSimple": {
+        "source_type": "mudabench",
+        "scope": "simple",
+        "files": ["simple.json", "documents.jsonl", "dataset_info.json", "pdfs/"],
+    },
+    "MuDABenchComplex": {
+        "source_type": "mudabench",
+        "scope": "complex",
+        "files": ["complex.json", "documents.jsonl", "dataset_info.json", "pdfs/"],
+    },
 }
 
 
@@ -271,6 +281,19 @@ def verify_dataset(dataset_name: str, dataset_dir: Path) -> bool:
             print(f"ScholarQA-Multi download verification failed: {dataset_dir}")
         return valid
 
+    if source.get("source_type") == "mudabench":
+        try:
+            from .dataset_handlers.mudabench import verify_mudabench_download
+        except ImportError:
+            from dataset_handlers.mudabench import verify_mudabench_download
+
+        valid = verify_mudabench_download(dataset_dir, source["scope"])
+        if valid:
+            print(f"✓ {dataset_name} verified successfully")
+        else:
+            print(f"MuDABench download verification failed: {dataset_dir}")
+        return valid
+
     missing_files = []
 
     for file_path in source["files"]:
@@ -423,6 +446,20 @@ def download_dataset(
         return download_scholarqa_multi_valid_101(
             output_dir=output_dir,
             dataset_name=dataset_name,
+            force=force,
+            verify=verify,
+        )
+
+    if source.get("source_type") == "mudabench":
+        try:
+            from .dataset_handlers.mudabench import download_mudabench
+        except ImportError:
+            from dataset_handlers.mudabench import download_mudabench
+
+        return download_mudabench(
+            output_dir=output_dir,
+            dataset_name=dataset_name,
+            scope=source["scope"],
             force=force,
             verify=verify,
         )

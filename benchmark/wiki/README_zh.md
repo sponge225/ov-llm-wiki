@@ -844,6 +844,61 @@ uv run python benchmark/wiki/run.py \
 
 每个 `gold_answers` 只保存一个答案：原始专家答案后附零基引用编号到论文标题的对照表，以消除 `[0]`、`[1]` 等标签的指代歧义。原始专家答案、完整 `ctxs` 和引用映射也保留在 QA metadata 中。实验继续使用项目现有通用评价指标，不启用 ScholarQABench 官方 Prometheus 或引用正确性指标。
 
+### MuDABench：Simple 与 Complex
+
+MuDABench 提供两个固定实验范围：
+
+- `MuDABenchSimple`：运行官方 `simple.json` 的全部 166 条 QA。
+- `MuDABenchComplex`：运行官方 `complex.json` 的全部 166 条 QA。
+
+数据固定到 Hugging Face revision `af2360876c0b8789e2ca1af9d648f9370eb52600`。两个范围都完整使用官方 589 份金融 PDF，语料集合完全相同，大小约为 3.78 GiB。PDF 缓存在 `benchmark/wiki/raw_data/MuDABench/pdf_cache/`，并通过官方 LFS SHA-256 和文件大小校验；两个准备目录优先使用硬链接复用缓存文件，在同一文件系统中不会重复占用相同文件内容的磁盘空间。
+
+两个 QA 文件各有 166 行和 164 个唯一 `question_id`，其中两组 QA 是官方文件中的完全重复记录。Adapter 按官方发布口径保留全部 166 行，并通过全局查询序号区分重复记录。`final_answer` 直接作为唯一 gold answer，`source_answer` 作为 evidence；评测继续使用项目现有 F1 和通用 LLM judge，不接入 MuDABench 官方 evaluator。
+
+先准备 Simple；这一步会下载完整 589-PDF 语料：
+
+```bash
+uv run python benchmark/wiki/scripts/prepare_dataset.py \
+  --dataset MuDABenchSimple \
+  --download-dir benchmark/wiki/raw_data \
+  --output-dir benchmark/wiki/datasets
+```
+
+再准备 Complex；已验证的 PDF 会从共享缓存复用：
+
+```bash
+uv run python benchmark/wiki/scripts/prepare_dataset.py \
+  --dataset MuDABenchComplex \
+  --download-dir benchmark/wiki/raw_data \
+  --output-dir benchmark/wiki/datasets
+```
+
+两份配置共享 `mudabench_589` 文档处理目录、向量库和 Wiki，因此只需要使用任意一个配置执行一次导入和 Wiki 构建。例如：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/MuDABench/mudabench_simple.yaml \
+  --step import
+
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/MuDABench/mudabench_simple.yaml \
+  --step build_wiki
+```
+
+然后分别运行两类 QA：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/MuDABench/mudabench_simple.yaml \
+  --step gen+eval
+
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/MuDABench/mudabench_complex.yaml \
+  --step gen+eval
+```
+
+MuDABench 官方说明指出，远程监督标注和文档覆盖限制可能导致部分问题不可回答，并建议优先关注年报类任务。当前适配为了保持完整 Simple/Complex 实验口径，不额外过滤这些记录。
+
 下载并生成 Qasper 示例数据：
 
 ```bash

@@ -1290,6 +1290,62 @@ def sample_scholarqa_multi_valid_101(
     return prepare_scholarqa_multi_valid_101(input_dir, output_dir)
 
 
+def _sample_mudabench(
+    input_dir: Path,
+    output_dir: Path,
+    *,
+    scope: str,
+    sample_size: Optional[int],
+    num_docs: Optional[int],
+) -> Dict[str, Any]:
+    if sample_size is not None or num_docs is not None:
+        raise ValueError(
+            "MuDABench scopes are fixed and do not accept sampling options"
+        )
+    try:
+        from .dataset_handlers.mudabench import prepare_mudabench
+    except ImportError:
+        from dataset_handlers.mudabench import prepare_mudabench
+
+    return prepare_mudabench(input_dir, output_dir, scope=scope)
+
+
+def sample_mudabench_simple(
+    input_dir: Path,
+    output_dir: Path,
+    sample_size: Optional[int] = None,
+    num_docs: Optional[int] = None,
+    seed: int = 42,
+    sample_mode: str = "random",
+) -> Dict[str, Any]:
+    """Prepare all 166 Simple QA with the complete 589-PDF corpus."""
+    return _sample_mudabench(
+        input_dir,
+        output_dir,
+        scope="simple",
+        sample_size=sample_size,
+        num_docs=num_docs,
+    )
+
+
+def sample_mudabench_complex(
+    input_dir: Path,
+    output_dir: Path,
+    sample_size: Optional[int] = None,
+    num_docs: Optional[int] = None,
+    seed: int = 42,
+    sample_mode: str = "random",
+) -> Dict[str, Any]:
+    """Prepare all 166 Complex QA with the complete 589-PDF corpus."""
+    return _sample_mudabench(
+        input_dir,
+        output_dir,
+        scope="complex",
+        sample_size=sample_size,
+        num_docs=num_docs,
+    )
+
+
 DATASET_SAMPLERS = {
     "Locomo": sample_locomo,
     "SyllabusQA": sample_syllabusqa,
@@ -1301,6 +1357,8 @@ DATASET_SAMPLERS = {
     "WildGraphBenchSummaryAll": sample_wildgraphbench_summary_all,
     "WildGraphBenchSummaryHealth": sample_wildgraphbench_summary_health,
     "ScholarQAMultiValid101": sample_scholarqa_multi_valid_101,
+    "MuDABenchSimple": sample_mudabench_simple,
+    "MuDABenchComplex": sample_mudabench_complex,
 }
 
 
