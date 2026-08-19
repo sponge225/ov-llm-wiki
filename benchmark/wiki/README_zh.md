@@ -899,6 +899,45 @@ uv run python benchmark/wiki/run.py \
 
 MuDABench 官方说明指出，远程监督标注和文档覆盖限制可能导致部分问题不可回答，并建议优先关注年报类任务。当前适配为了保持完整 Simple/Complex 实验口径，不额外过滤这些记录。
 
+### EnterpriseRAG-Bench：三个类别的 80 条 QA
+
+`EnterpriseRAGBenchSelected80` 固定使用 EnterpriseRAG-Bench `v1.0.0` Release，只运行以下三个类别：
+
+- `project_related`：40 条 QA。
+- `conflicting_info`：20 条 QA。
+- `completeness`：20 条 QA。
+
+三类合计 80 条 QA，引用 322 个不同的逻辑 `doc_id`。其中 `qst_0413` 故意引用两个 `doc_id` 相同、内容和文件名不同的 Jira 文档；下载器和 Adapter 不按逻辑 ID 粗略去重，而是保留两个物理文件。因此共享语料库实际包含 323 份 TXT 文档。
+
+准备数据时会下载官方 `questions.jsonl` 和约 1.17 GiB 的 `all_documents.zip`。完整压缩包固定缓存在 `benchmark/wiki/raw_data/EnterpriseRAGBench/v1.0.0/`，但只从中提取并准备上述 80 条 QA 对应的 323 份 TXT，不会把其余 50 多万份文档入库。下载文件通过官方 Release 的大小与 SHA-256 校验。
+
+下载并准备固定范围：
+
+```bash
+uv run python benchmark/wiki/scripts/prepare_dataset.py \
+  --dataset EnterpriseRAGBenchSelected80 \
+  --download-dir benchmark/wiki/raw_data \
+  --output-dir benchmark/wiki/datasets
+```
+
+导入 323 份 TXT、构建 Wiki、运行 80 条 QA 并评测：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/EnterpriseRAGBench/enterprise_rag_bench_selected_80.yaml \
+  --step import
+
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/EnterpriseRAGBench/enterprise_rag_bench_selected_80.yaml \
+  --step build_wiki
+
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/EnterpriseRAGBench/enterprise_rag_bench_selected_80.yaml \
+  --step gen+eval
+```
+
+Adapter 将官方 `gold_answer` 直接作为唯一 gold answer，将 `answer_facts` 保存为 evidence，同时在 metadata 中保留原始 `expected_doc_ids`、物理文件映射和来源类型。评测继续使用项目现有 F1 和通用 LLM judge，不接入 EnterpriseRAG-Bench 官方评价器。
+
 下载并生成 Qasper 示例数据：
 
 ```bash

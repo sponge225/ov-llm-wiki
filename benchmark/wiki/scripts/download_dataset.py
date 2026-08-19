@@ -115,6 +115,16 @@ DATASET_SOURCES = {
         "scope": "complex",
         "files": ["complex.json", "documents.jsonl", "dataset_info.json", "pdfs/"],
     },
+    "EnterpriseRAGBenchSelected80": {
+        "source_type": "enterprise_rag_bench",
+        "files": [
+            "questions.jsonl",
+            "questions_selected_80.jsonl",
+            "documents.jsonl",
+            "dataset_info.json",
+            "reference_documents/",
+        ],
+    },
 }
 
 
@@ -294,6 +304,23 @@ def verify_dataset(dataset_name: str, dataset_dir: Path) -> bool:
             print(f"MuDABench download verification failed: {dataset_dir}")
         return valid
 
+    if source.get("source_type") == "enterprise_rag_bench":
+        try:
+            from .dataset_handlers.enterprise_rag_bench import (
+                verify_enterprise_rag_bench_download,
+            )
+        except ImportError:
+            from dataset_handlers.enterprise_rag_bench import (
+                verify_enterprise_rag_bench_download,
+            )
+
+        valid = verify_enterprise_rag_bench_download(dataset_dir)
+        if valid:
+            print(f"✓ {dataset_name} verified successfully")
+        else:
+            print(f"EnterpriseRAG-Bench download verification failed: {dataset_dir}")
+        return valid
+
     missing_files = []
 
     for file_path in source["files"]:
@@ -460,6 +487,23 @@ def download_dataset(
             output_dir=output_dir,
             dataset_name=dataset_name,
             scope=source["scope"],
+            force=force,
+            verify=verify,
+        )
+
+    if source.get("source_type") == "enterprise_rag_bench":
+        try:
+            from .dataset_handlers.enterprise_rag_bench import (
+                download_enterprise_rag_bench_selected_80,
+            )
+        except ImportError:
+            from dataset_handlers.enterprise_rag_bench import (
+                download_enterprise_rag_bench_selected_80,
+            )
+
+        return download_enterprise_rag_bench_selected_80(
+            output_dir=output_dir,
+            dataset_name=dataset_name,
             force=force,
             verify=verify,
         )

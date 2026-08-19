@@ -1346,6 +1346,32 @@ def sample_mudabench_complex(
     )
 
 
+def sample_enterprise_rag_bench_selected_80(
+    input_dir: Path,
+    output_dir: Path,
+    sample_size: Optional[int] = None,
+    num_docs: Optional[int] = None,
+    seed: int = 42,
+    sample_mode: str = "random",
+) -> Dict[str, Any]:
+    """Prepare the fixed three-category EnterpriseRAG-Bench scope."""
+    if sample_size is not None or num_docs is not None:
+        raise ValueError(
+            "EnterpriseRAGBenchSelected80 is a fixed subset and does not accept "
+            "sampling options"
+        )
+    try:
+        from .dataset_handlers.enterprise_rag_bench import (
+            prepare_enterprise_rag_bench_selected_80,
+        )
+    except ImportError:
+        from dataset_handlers.enterprise_rag_bench import (
+            prepare_enterprise_rag_bench_selected_80,
+        )
+
+    return prepare_enterprise_rag_bench_selected_80(input_dir, output_dir)
+
+
 DATASET_SAMPLERS = {
     "Locomo": sample_locomo,
     "SyllabusQA": sample_syllabusqa,
@@ -1359,6 +1385,7 @@ DATASET_SAMPLERS = {
     "ScholarQAMultiValid101": sample_scholarqa_multi_valid_101,
     "MuDABenchSimple": sample_mudabench_simple,
     "MuDABenchComplex": sample_mudabench_complex,
+    "EnterpriseRAGBenchSelected80": sample_enterprise_rag_bench_selected_80,
 }
 
 
