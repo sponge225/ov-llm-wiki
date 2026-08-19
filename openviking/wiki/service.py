@@ -13,12 +13,12 @@ from openviking.storage.viking_fs import VikingFS
 from openviking_cli.exceptions import InvalidArgumentError, NotFoundError, NotInitializedError
 from openviking_cli.utils.config import get_openviking_config
 
-from .client_adapter import WikiServiceClientAdapter
 from .config import WikiConfig
 from .content_loader import WikiContentLoader
 from .document_manifest import load_document_manifest, wiki_inputs_from_manifest
 from .pipeline import WikiPipeline
 from .schemas import WikiResourceInput
+from .writer import WikiVikingFSWriter
 
 
 class WikiService:
@@ -57,7 +57,6 @@ class WikiService:
 
         assert self._viking_fs is not None
         assert self._vikingdb is not None
-        adapter = WikiServiceClientAdapter(self._viking_fs, self._vikingdb, ctx)
         loader = WikiContentLoader(self._viking_fs, self._vikingdb, ctx)
         wiki_config = WikiConfig(
             wiki_root_uri=wiki_root_uri,
@@ -66,7 +65,13 @@ class WikiService:
         vlm_config = getattr(get_openviking_config(), "vlm", None)
         if vlm_config is not None:
             wiki_config.vlm_config = vlm_config._build_vlm_config_dict()
-        pipeline = WikiPipeline(adapter, config=wiki_config)
+        writer = WikiVikingFSWriter(
+            viking_fs=self._viking_fs,
+            vikingdb=self._vikingdb,
+            ctx=ctx,
+            config=wiki_config,
+        )
+        pipeline = WikiPipeline(writer=writer, config=wiki_config)
         artifacts = await pipeline.run_from_inputs(
             wiki_inputs,
             content_loader=loader,
@@ -163,7 +168,6 @@ class WikiService:
             doc_id=f"resource_{doc_hash}",
             resource_uri=resource_uri,
             title=title,
-            source_type="resource_document",
             document_dir_uri=resource_uri,
             metadata={
                 "root_uri": resource_uri,

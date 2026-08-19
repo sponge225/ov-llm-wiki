@@ -11,14 +11,15 @@ async def test_service_wiki_build_uses_stable_wiki_root(monkeypatch):
     captured = {}
 
     class FakePipeline:
-        def __init__(self, _adapter, *, config):
+        def __init__(self, *, writer, config):
+            captured["writer"] = writer
             captured["config"] = config
 
         async def run_from_inputs(self, wiki_inputs, *, content_loader, card_input_mode, max_card_input_chars):
             return SimpleNamespace(cards=[], nodes=[], node_contexts=[])
 
     monkeypatch.setattr(
-        "openviking.wiki.service.WikiServiceClientAdapter",
+        "openviking.wiki.service.WikiVikingFSWriter",
         lambda *args, **kwargs: object(),
     )
     monkeypatch.setattr(
@@ -52,7 +53,8 @@ async def test_service_wiki_build_expands_document_manifest(monkeypatch):
     root_uri = "viking://resources/qasper_30_processed_docs"
 
     class FakePipeline:
-        def __init__(self, _adapter, *, config):
+        def __init__(self, *, writer, config):
+            captured["writer"] = writer
             captured["config"] = config
 
         async def run_from_inputs(self, wiki_inputs, *, content_loader, card_input_mode, max_card_input_chars):
@@ -60,7 +62,7 @@ async def test_service_wiki_build_expands_document_manifest(monkeypatch):
             return SimpleNamespace(cards=[], nodes=[], node_contexts=[])
 
     monkeypatch.setattr(
-        "openviking.wiki.service.WikiServiceClientAdapter",
+        "openviking.wiki.service.WikiVikingFSWriter",
         lambda *args, **kwargs: object(),
     )
     monkeypatch.setattr(
@@ -109,14 +111,15 @@ async def test_service_wiki_build_allows_missing_vlm_config(monkeypatch):
     captured = {}
 
     class FakePipeline:
-        def __init__(self, _adapter, *, config):
+        def __init__(self, *, writer, config):
+            captured["writer"] = writer
             captured["config"] = config
 
         async def run_from_inputs(self, wiki_inputs, *, content_loader, card_input_mode, max_card_input_chars):
             return SimpleNamespace(cards=[], nodes=[], node_contexts=[])
 
     monkeypatch.setattr(
-        "openviking.wiki.service.WikiServiceClientAdapter",
+        "openviking.wiki.service.WikiVikingFSWriter",
         lambda *args, **kwargs: object(),
     )
     monkeypatch.setattr(

@@ -39,8 +39,6 @@ openviking/wiki/
 │   └── 渲染 openviking/prompts/templates/wiki/ 下的模板。
 ├── cards.py
 │   └── 为每篇资源文档生成 Document Card。
-├── profile.py
-│   └── 基于 cards 生成资源空间画像。
 ├── nodes.py
 │   └── 发现底层节点和父层节点。
 ├── assignments.py
@@ -51,8 +49,6 @@ openviking/wiki/
 │   └── 判断是否继续向上生成父层节点。
 ├── content_loader.py
 │   └── 服务侧构建时，从 VikingFS/VikingDB 加载 summary 或 raw chunk。
-├── client_adapter.py
-│   └── 把服务侧 client 适配成 writer 需要的接口。
 └── pipeline.py
     └── 总编排器，串起完整 Wiki 生成流程。
 ```
@@ -62,16 +58,15 @@ openviking/wiki/
 1. `schemas.py`：先看最终数据契约。
 2. `document_manifest.py`、`service.py`：看独立接口如何把资源 root 展开成文档输入。
 3. `prompts.py` 和 `openviking/prompts/templates/wiki/`：看每一步给模型的输入。
-4. `cards.py`、`profile.py`、`nodes.py`、`assignments.py`、`documents.py`、`layer_decision.py`：按阶段看行为。
+4. `cards.py`、`nodes.py`、`assignments.py`、`documents.py`、`layer_decision.py`：按阶段看行为。
 5. `pipeline.py`：看编排、过滤和写入时机。
-6. `content_loader.py`、`client_adapter.py`：看服务侧如何加载内容和写产物。
+6. `content_loader.py`、`writer.py`：看服务侧如何加载内容和写产物。
 
 ## 生成流程
 
 ```text
 资源文档
   -> Document Cards
-  -> 资源空间画像
   -> 底层节点发现
   -> SourceRef 构造
   -> node.md + 节点正文
@@ -164,7 +159,6 @@ viking://resources/qasper_30_processed_docs/nested/paper_b
 底层节点从 Document Card 中发现。模型返回候选节点，以及每个节点由哪些 `doc_id` 支撑。代码随后：
 
 - 规范化 `node_id`；
-- 用 `max_active_nodes` 限制 active 节点数量；
 - 基于已知 `DocumentCard` 构造 `SourceRef`；
 - 用 `min_refs_per_node` 过滤来源不足的节点；
 - 为保留下来的 active 节点写 `node.md` 和正文文档。
@@ -185,8 +179,6 @@ viking://resources/qasper_30_processed_docs/nested/paper_b
 
 ```text
 viking://wiki/my_wiki/
-├── manifest.json
-├── profile.json
 ├── nodes.json
 ├── source_assignments.json
 ├── cards/
@@ -195,7 +187,6 @@ viking://wiki/my_wiki/
 ├── nodes/
 │   └── <node_id>/
 │       ├── node.md
-│       ├── manifest.json
 │       ├── documents/
 │       │   └── 0001.md
 │       └── sources/
@@ -209,10 +200,8 @@ viking://wiki/my_wiki/
 
 关键文件：
 
-- `manifest.json`：整个 Wiki 的顶层索引。
-- `profile.json`：资源空间画像。
-- `nodes.json`：所有发现节点，包括 rejected 节点。
-- `source_assignments.json`：节点级来源引用和未分配文档。
+- `nodes.json`：所有发现节点，包括层级、父子关系和 rejected 节点。
+- `source_assignments.json`：节点级来源引用和未分配来源。
 - `cards/*.card.json`：后续阶段使用的结构化 card。
 - `cards/*.card.md`：人类可读 card。
 - `nodes/<node_id>/node.md`：节点说明和边界。
@@ -230,7 +219,6 @@ viking://wiki/my_wiki/
 当前会调用 LLM 的阶段：
 
 - `document_card`
-- `resource_profile`
 - `bottom_node_discovery`
 - `parent_node_discovery`
 - `node_md`
@@ -269,7 +257,7 @@ client.clear_wiki()
 1. 接收已入库的 `viking://resources/...` URI。
 2. 校验资源存在，并尝试读取每个 resource root 下的 `.wiki_documents.json`。
 3. 如果存在文档边界 manifest，就按文档记录展开成多个 `WikiResourceInput`；否则把 resource root 当作单篇输入。
-4. 创建 `WikiServiceClientAdapter` 和 `WikiContentLoader`。
+4. 创建 `WikiVikingFSWriter` 和 `WikiContentLoader`。
 5. 调用 `WikiPipeline.run_from_inputs(...)`。
 
 `WikiService.clear_wiki(...)` 删除 `wiki_root_uri` 下的 Wiki 产物，默认是 `viking://wiki/`。清理接口固定幂等：目标不存在也返回成功。它只清理 Wiki 产物，不删除 `viking://resources/...` 下的原始入库文档、语义摘要、向量索引或 `.wiki_documents.json`。因此：
@@ -298,7 +286,6 @@ add_resource -> build_wiki -> clear_wiki
 | 参数 | 含义 | 默认值 |
 | --- | --- | --- |
 | `max_depth` | 最多生成几层 Wiki 节点 | `2` |
-| `max_active_nodes` | 每层最多保留多少个 active 节点 | `20` |
 | `min_refs_per_node` | 底层节点最少需要多少个文档来源 | `3` |
 | `min_child_nodes_per_parent` | 父节点最少需要多少个子节点 | `3` |
 | `max_concurrent_cards` | Document Card 并发生成数 | `10` |

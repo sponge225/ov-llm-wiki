@@ -46,7 +46,7 @@ def _normalize_manifest_drafts(
     *,
     source_format: str | None,
 ) -> list[ResourceDocumentDraft]:
-    if source_format == "directory" or len(drafts) != 1:
+    if source_format in {None, "directory"} or len(drafts) != 1:
         return drafts
     draft = drafts[0]
     return [
@@ -81,7 +81,6 @@ def _wiki_input_from_draft(root_uri: str, draft: ResourceDocumentDraft) -> WikiR
         doc_id=draft.doc_id,
         resource_uri=resource_uri,
         title=draft.title,
-        source_type="resource_document",
         document_dir_uri=resource_uri,
         metadata={
             "root_uri": root_uri,

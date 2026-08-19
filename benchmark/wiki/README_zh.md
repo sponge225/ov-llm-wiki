@@ -420,7 +420,7 @@ find benchmark/wiki/wiki_storage/qasper_30/qasper_30_viking_store_index/viking/d
 ```text
 nodes.json
 source_assignments.json
-profile.json
+cards/
 ```
 
 如果这些产物存在，可以直接跑生成和评测：

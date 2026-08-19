@@ -10,7 +10,7 @@ from .test_pipeline_order import _card_response
 
 
 @pytest.mark.asyncio
-async def test_node_discovery_caps_active_nodes_by_available_support():
+async def test_node_discovery_keeps_llm_nodes_for_later_support_filtering():
     fake_vlm = FakeVLM(
         [
             {
@@ -35,13 +35,13 @@ async def test_node_discovery_caps_active_nodes_by_available_support():
     )
     nodes = result.nodes
 
-    active_nodes = [node for node in nodes if node.status == "active"]
-    rejected_nodes = [node for node in nodes if node.status == "rejected"]
-
-    assert [node.title for node in active_nodes] == [
-        "Reading comprehension dataset construction"
+    assert [node.title for node in nodes] == [
+        "Reading comprehension dataset construction",
+        "Semi-supervised question answering",
+        "Cross-modal alignment",
     ]
-    assert len(rejected_nodes) == 2
+    assert all(node.status == "active" for node in nodes)
+    assert len(result.source_assignments.assignments) == 3
     node_schema = fake_vlm.schemas[0]["$defs"]["WikiBottomNodeDiscoveryItem"]
     assert set(node_schema["properties"]) == {
         "title",
@@ -123,6 +123,34 @@ async def test_node_discovery_retries_invalid_structured_output_with_same_prompt
         "OARW_2",
         "OARW_3",
     ]
+    assert len(fake_vlm.calls) == 2
+    assert fake_vlm.calls[0] == fake_vlm.calls[1]
+
+
+@pytest.mark.asyncio
+async def test_node_discovery_retries_invalid_json_result_with_same_prompt():
+    fake_vlm = FakeVLM(
+        [
+            None,
+            {
+                "nodes": [
+                    _node("Low-resource language processing")
+                ]
+            },
+        ]
+    )
+    runner = NodeDiscoveryRunner(WikiLLMRunner(fake_vlm), WikiConfig())
+
+    result = await runner.discover_bottom_layer(
+        [
+            DocumentCard.model_validate(_card_response(1)),
+            DocumentCard.model_validate(_card_response(2)),
+            DocumentCard.model_validate(_card_response(3)),
+        ],
+        depth=1,
+    )
+
+    assert result.nodes[0].node_id == "low_resource_language_processing"
     assert len(fake_vlm.calls) == 2
     assert fake_vlm.calls[0] == fake_vlm.calls[1]
 

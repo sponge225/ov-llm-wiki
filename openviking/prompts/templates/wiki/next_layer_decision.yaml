@@ -7,13 +7,9 @@ metadata:
   category: "wiki"
 
 variables:
-  - name: "boundary"
-    type: "string"
-    description: "Wiki data boundary instruction"
-    required: true
   - name: "input_json"
     type: "string"
-    description: "JSON encoded profile and completed child nodes"
+    description: "JSON encoded completed child nodes"
     required: true
   - name: "min_child_nodes_per_parent"
     type: "int"
@@ -22,8 +18,6 @@ variables:
 
 template: |
   Decide whether the completed current layer should be aggregated upward.
-
-  {{ boundary }}
 
   Return continue_upward=true only if multiple active nodes share a stable higher-level theme and the parent node adds organization value.
   Do not continue upward for a generic overview label. Continue only if at least {{ min_child_nodes_per_parent }} clearly related child nodes can form a useful parent node.

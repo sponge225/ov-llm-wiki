@@ -10,13 +10,7 @@ from .schemas import (
     DocumentCard,
     GeneratedNodeContext,
     ResourceDocument,
-    ResourceSpaceProfile,
     WikiNode,
-)
-
-_BOUNDARY = (
-    "Do not use question, gold answer, gold_related_work, or target_paper.hierarchy. "
-    "Only use the provided resources and already generated Wiki assets."
 )
 
 _PROMPT_MANAGER = PromptManager()
@@ -29,22 +23,10 @@ def build_document_card_prompt(doc: ResourceDocument) -> str:
         if key in {"card_input_mode", "missing_summary_uris"}
     }
     payload = {
-        "source_abstract": doc.abstract,
         "content_or_structure": doc.content_or_structure,
         "metadata": metadata,
     }
     return _render_wiki_prompt("wiki.document_card", payload)
-
-
-def build_profile_prompt(cards: list[DocumentCard]) -> str:
-    payload = [
-        card.model_dump(
-            include={"doc_id", "title", "summary", "main_points", "important_terms", "candidate_topics"},
-            mode="json",
-        )
-        for card in cards
-    ]
-    return _render_wiki_prompt("wiki.resource_profile", payload)
 
 
 def build_bottom_node_discovery_prompt(
@@ -113,12 +95,10 @@ def build_parent_node_documents_prompt(
 
 
 def build_next_layer_decision_prompt(
-    profile: ResourceSpaceProfile,
     child_nodes: list[GeneratedNodeContext],
     min_child_nodes_per_parent: int = 3,
 ) -> str:
     inputs = {
-        "profile": profile.model_dump(mode="json"),
         "child_nodes": [_child_node_payload(context) for context in child_nodes],
     }
     return _render_wiki_prompt(
@@ -139,12 +119,7 @@ def _child_node_payload(context: GeneratedNodeContext) -> dict:
 
 def _render_wiki_prompt(prompt_id: str, payload: object, **extra_vars: object) -> str:
     variables = {
-        "boundary": _BOUNDARY,
-        "input_json": _json(payload),
+        "input_json": json.dumps(payload, ensure_ascii=False, indent=2),
         **extra_vars,
     }
     return _PROMPT_MANAGER.render(prompt_id, variables)
-
-
-def _json(payload: object) -> str:
-    return json.dumps(payload, ensure_ascii=False, indent=2)

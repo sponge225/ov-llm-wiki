@@ -21,10 +21,6 @@ def wiki_root(config: WikiConfig) -> str:
     return _slash(config.wiki_root_uri)
 
 
-def profile_uri(config: WikiConfig) -> str:
-    return f"{wiki_root(config)}profile.json"
-
-
 def cards_dir(config: WikiConfig) -> str:
     return f"{wiki_root(config)}cards/"
 

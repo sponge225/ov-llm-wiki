@@ -68,18 +68,8 @@ class WikiResourceInput(StrictModel):
     doc_id: NonEmptyStr
     resource_uri: ResourceUri
     title: NonEmptyStr
-    source_type: NonEmptyStr = "resource_document"
-    summary: str = ""
-    abstract: str = ""
     document_dir_uri: OptionalResourceUri = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class EvidenceAnchor(StrictModel):
-    """Document Card 中记录的可引用位置，用来指向原文中的章节或片段。"""
-    section_title: NonEmptyStr
-    section_uri: NonEmptyStr
-    summary: str = ""
 
 
 class ResourceDocument(StrictModel):
@@ -87,11 +77,7 @@ class ResourceDocument(StrictModel):
     doc_id: NonEmptyStr
     resource_uri: ResourceUri
     title: NonEmptyStr
-    source_type: NonEmptyStr = "academic_paper_full_text"
-    summary: str = ""
-    abstract: str = ""
     content_or_structure: str = ""
-    chunk_summaries: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -100,9 +86,7 @@ class DocumentCardContent(StrictModel):
     summary: NonEmptyStr
     main_points: NonEmptyStrList
     important_terms: list[str] = Field(default_factory=list)
-    limitations_or_notes: list[str] = Field(default_factory=list)
     candidate_topics: NonEmptyStrList
-    evidence_anchors: Annotated[list[EvidenceAnchor], Field(min_length=1)]
 
 
 class DocumentCard(DocumentCardContent):
@@ -110,17 +94,7 @@ class DocumentCard(DocumentCardContent):
     doc_id: NonEmptyStr
     resource_uri: ResourceUri
     title: NonEmptyStr
-    source_type: NonEmptyStr
     markdown: str = ""
-
-
-class ResourceSpaceProfile(StrictModel):
-    """整批 Document Card 的主题画像，用来指导 Wiki 节点发现。"""
-    space_title: NonEmptyStr
-    space_summary: NonEmptyStr
-    main_topics: NonEmptyStrList
-    important_terms: list[str] = Field(default_factory=list)
-    notes: list[str] = Field(default_factory=list)
 
 
 class WikiNode(StrictModel):
@@ -177,10 +151,10 @@ class SourceRef(StrictModel):
 
 
 class SourceAssignmentResult(StrictModel):
-    """来源分配阶段的完整结果，按节点组织可引用来源并记录未分配文档。"""
+    """来源分配阶段的完整结果，按节点组织可引用来源并记录未分配来源。"""
     source_refs_by_node: dict[str, list[SourceRef]]
     child_node_ids_by_node: dict[str, list[str]] = Field(default_factory=dict)
-    unassigned_doc_ids: list[str] = Field(default_factory=list)
+    unassigned_source_ids: list[str] = Field(default_factory=list)
 
 
 class SourceAssignmentItem(StrictModel):
@@ -193,7 +167,7 @@ class SourceAssignmentItem(StrictModel):
 class SourceAssignmentResponse(StrictModel):
     """来源分配步骤的结构化响应，保留模型返回的节点到来源 ID 的绑定。"""
     assignments: list[SourceAssignmentItem]
-    unassigned_doc_ids: list[str] = Field(default_factory=list)
+    unassigned_source_ids: list[str] = Field(default_factory=list)
 
 
 class NodeDocumentContent(StrictModel):
@@ -231,35 +205,9 @@ class GeneratedNodeContext(StrictModel):
     source_refs: list[SourceRef]
 
 
-class NodeManifest(StrictModel):
-    """单个节点目录的索引文件，记录该节点写出了哪些文件和数量统计。"""
-    node_id: str
-    title: str
-    node_uri: str
-    node_md: str
-    documents_dir: str
-    document_uris: list[str]
-    sources_dir: str
-    num_source_refs: int
-    num_node_documents: int
-
-
-class WikiManifest(StrictModel):
-    """整个 Wiki 产物的顶层索引，记录根目录、关键文件 URI 和生成时间。"""
-    pipeline_version: str
-    resource_root_uri: str
-    wiki_root: str
-    profile_uri: str
-    cards_dir: str
-    node_uris: list[str]
-    created_at: str
-
-
 class PipelineArtifacts(StrictModel):
     """Wiki pipeline 一次运行的内存产物集合，用于串联各阶段输出。"""
     cards: list[DocumentCard] = Field(default_factory=list)
-    profile: ResourceSpaceProfile | None = None
     nodes: list[WikiNode] = Field(default_factory=list)
     source_refs_by_node: dict[str, list[SourceRef]] = Field(default_factory=dict)
     node_contexts: list[GeneratedNodeContext] = Field(default_factory=list)
-    manifest: WikiManifest | None = None

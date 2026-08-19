@@ -34,6 +34,7 @@ RETRIEVAL_OUTPUT_FIELDS = [
 LOOKUP_OUTPUT_FIELDS = [
     "uri",
     "level",
+    "abstract",
     "active_count",
 ]
 
