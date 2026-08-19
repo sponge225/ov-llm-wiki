@@ -66,7 +66,6 @@ class NodeDiscoveryRunner:
             validate=lambda result: self._parse_bottom_layer_result(
                 result,
                 depth,
-                len(cards),
             ),
         )
 
@@ -74,11 +73,9 @@ class NodeDiscoveryRunner:
         self,
         result: dict,
         depth: int,
-        source_unit_count: int,
     ) -> BottomLayerDiscoveryResult:
         response = WikiBottomNodeDiscoveryResponse.model_validate(result)
-        nodes = self._cap_active_nodes(self._build_nodes(response.nodes, depth), source_unit_count)
-        active_node_ids = {node.node_id for node in nodes if node.status == "active"}
+        nodes = self._build_nodes(response.nodes, depth)
         assignments = [
             SourceAssignmentItem(
                 node_id=node.node_id,
@@ -86,13 +83,12 @@ class NodeDiscoveryRunner:
                 support_scope=node.scope,
             )
             for node, item in zip(nodes, response.nodes, strict=False)
-            if node.node_id in active_node_ids
         ]
         return BottomLayerDiscoveryResult(
             nodes=nodes,
             source_assignments=SourceAssignmentResponse(
                 assignments=assignments,
-                unassigned_doc_ids=response.unassigned_doc_ids,
+                unassigned_source_ids=response.unassigned_doc_ids,
             ),
         )
 
@@ -114,7 +110,6 @@ class NodeDiscoveryRunner:
             validate=lambda result: self._parse_parent_layer_result(
                 result,
                 depth,
-                len(child_nodes),
                 title_to_node_id,
             ),
         )
@@ -123,12 +118,10 @@ class NodeDiscoveryRunner:
         self,
         result: dict,
         depth: int,
-        source_unit_count: int,
         title_to_node_id: dict[str, str],
     ) -> ParentLayerDiscoveryResult:
         response = WikiParentNodeDiscoveryResponse.model_validate(result)
-        nodes = self._cap_active_nodes(self._build_nodes(response.nodes, depth), source_unit_count)
-        active_node_ids = {node.node_id for node in nodes if node.status == "active"}
+        nodes = self._build_nodes(response.nodes, depth)
         assignments = [
             SourceAssignmentItem(
                 node_id=node.node_id,
@@ -136,9 +129,8 @@ class NodeDiscoveryRunner:
                 support_scope=node.scope,
             )
             for node, item in zip(nodes, response.nodes, strict=False)
-            if node.node_id in active_node_ids
         ]
-        unassigned_doc_ids = _map_child_titles(
+        unassigned_source_ids = _map_child_titles(
             response.unassigned_child_titles,
             title_to_node_id,
             "unassigned_child_titles",
@@ -147,7 +139,7 @@ class NodeDiscoveryRunner:
             nodes=nodes,
             source_assignments=SourceAssignmentResponse(
                 assignments=assignments,
-                unassigned_doc_ids=unassigned_doc_ids,
+                unassigned_source_ids=unassigned_source_ids,
             ),
         )
 
@@ -175,26 +167,6 @@ class NodeDiscoveryRunner:
                 )
             )
         return nodes
-
-    def _cap_active_nodes(self, nodes: list[WikiNode], source_unit_count: int) -> list[WikiNode]:
-        effective_limit = self._effective_active_node_limit(source_unit_count)
-        kept_active = 0
-        capped: list[WikiNode] = []
-        for node in nodes:
-            if node.status != "active":
-                capped.append(node)
-                continue
-            kept_active += 1
-            if kept_active <= effective_limit:
-                capped.append(node)
-                continue
-            capped.append(node.model_copy(update={"status": "rejected"}))
-        return capped
-
-    def _effective_active_node_limit(self, source_unit_count: int) -> int:
-        min_refs = max(1, self.config.limits.min_refs_per_node)
-        support_limited = max(1, source_unit_count // min_refs)
-        return max(1, min(self.config.limits.max_active_nodes, support_limited))
 
 
 def _child_title_to_node_id(child_nodes: list[GeneratedNodeContext]) -> dict[str, str]:
@@ -228,12 +200,12 @@ async def _complete_with_validation_retry(
 ) -> T:
     last_error: Exception | None = None
     for attempt in range(1, MAX_VALIDATION_ATTEMPTS + 1):
-        result = await llm.complete_json(
-            step=step,
-            prompt=prompt,
-            schema=schema,
-        )
         try:
+            result = await llm.complete_json(
+                step=step,
+                prompt=prompt,
+                schema=schema,
+            )
             return validate(result)
         except (RuntimeError, ValidationError) as exc:
             last_error = exc

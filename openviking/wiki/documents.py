@@ -31,11 +31,16 @@ class NodeContentGenerator:
         self.llm = llm
 
     async def generate_node_md(self, node: WikiNode) -> str:
-        result = await self.llm.complete_json(
+        return await _complete_with_validation_retry(
+            self.llm,
             step="node_md",
             prompt=build_node_md_prompt(node),
             schema=NodeMarkdownResponse.model_json_schema(),
+            node_id=node.node_id,
+            validate=lambda result: self._parse_node_md_result(node, result),
         )
+
+    def _parse_node_md_result(self, node: WikiNode, result: dict) -> str:
         response = NodeMarkdownResponse.model_validate(result)
         node_md = response.node_md.strip()
         if not node_md:
@@ -130,12 +135,12 @@ async def _complete_with_validation_retry(
 ) -> T:
     last_error: Exception | None = None
     for attempt in range(1, MAX_VALIDATION_ATTEMPTS + 1):
-        result = await llm.complete_json(
-            step=step,
-            prompt=prompt,
-            schema=schema,
-        )
         try:
+            result = await llm.complete_json(
+                step=step,
+                prompt=prompt,
+                schema=schema,
+            )
             return validate(result)
         except (RuntimeError, ValidationError) as exc:
             last_error = exc

@@ -83,17 +83,9 @@ def _card(doc_id: str) -> DocumentCard:
         doc_id=doc_id,
         resource_uri=f"viking://resources/{doc_id}/",
         title=f"Paper {doc_id}",
-        source_type="academic_paper_full_text",
         summary="QA summary.",
         main_points=["QA"],
         candidate_topics=["question answering"],
-        evidence_anchors=[
-            {
-                "section_title": "Abstract",
-                "section_uri": f"viking://resources/{doc_id}/abstract",
-                "summary": "QA evidence.",
-            }
-        ],
     )
 
 

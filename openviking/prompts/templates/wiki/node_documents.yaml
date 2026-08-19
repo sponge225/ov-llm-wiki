@@ -7,10 +7,6 @@ metadata:
   category: "wiki"
 
 variables:
-  - name: "boundary"
-    type: "string"
-    description: "Wiki data boundary instruction"
-    required: true
   - name: "input_json"
     type: "string"
     description: "JSON encoded node and source document sections"
@@ -18,8 +14,6 @@ variables:
 
 template: |
   Generate Wiki documents for the given Wiki node.
-
-  {{ boundary }}
 
   Task:
   - Write the synthesized Markdown content for this Wiki node. Use one document by default; split into multiple documents only to keep each document readable when the content is long.
