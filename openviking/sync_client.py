@@ -278,7 +278,7 @@ class SyncOpenViking:
         resource_uris: List[str],
         wiki_root_uri: str = "viking://wiki/",
         card_input_mode: str = "summary",
-        max_card_input_chars: int = 100000,
+        max_card_input_chars: int = 20000,
         telemetry: TelemetryRequest = False,
     ) -> Dict[str, Any]:
         """Build Wiki from existing resources."""

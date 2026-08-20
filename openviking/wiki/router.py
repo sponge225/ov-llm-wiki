@@ -25,7 +25,7 @@ class BuildWikiRequest(BaseModel):
     resource_uris: list[str] = Field(min_length=1)
     wiki_root_uri: str = "viking://wiki/"
     card_input_mode: Literal["summary", "raw_chunk"] = "summary"
-    max_card_input_chars: int = 100000
+    max_card_input_chars: int = 20000
     telemetry: TelemetryRequest = False
 
 
