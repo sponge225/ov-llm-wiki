@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from openviking.wiki.config import WikiConfig, WikiGenerationLimits
@@ -59,6 +61,35 @@ async def test_pipeline_generates_layer_content_before_next_layer_decision():
     assert "viking://wiki/nodes/question_answering/documents/0001.md" in client.writes
     assert "viking://wiki/nodes/question_answering/evidence.jsonl" not in client.writes
     assert artifacts.node_contexts[0].documents[0].document_id == "0001"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_run_config_redacts_sensitive_vlm_config():
+    client = FakeClient()
+    config = WikiConfig(
+        vlm_config={
+            "provider": "volcengine",
+            "api_key": "secret-key",
+            "nested": {"token": "secret-token", "model": "demo"},
+        }
+    )
+    writer = WikiVikingFSWriter(
+        viking_fs=client,
+        vikingdb=object(),
+        ctx=object(),
+        config=config,
+        content_writer=client,
+    )
+
+    await WikiPipeline(writer=writer, config=config, llm=WikiLLMRunner(FakeVLM([])))._write_run_records()
+
+    run_config = json.loads(client.writes["viking://wiki/run/config.json"])
+    assert run_config["model_config"]["provider"] == "volcengine"
+    assert run_config["model_config"]["nested"]["model"] == "demo"
+    assert run_config["model_config"]["api_key"] == "***REDACTED***"
+    assert run_config["model_config"]["nested"]["token"] == "***REDACTED***"
+    assert "secret-key" not in client.writes["viking://wiki/run/config.json"]
+    assert "secret-token" not in client.writes["viking://wiki/run/config.json"]
 
 
 @pytest.mark.asyncio

@@ -37,6 +37,19 @@ from .writer import WikiVikingFSWriter
 
 
 logger = logging.getLogger(__name__)
+_SENSITIVE_CONFIG_KEYS = {
+    "api_key",
+    "apikey",
+    "api-key",
+    "access_key",
+    "access-key",
+    "secret_key",
+    "secret-key",
+    "secret",
+    "token",
+    "authorization",
+    "password",
+}
 
 
 class WikiPipeline:
@@ -64,7 +77,7 @@ class WikiPipeline:
         *,
         content_loader: WikiContentLoader,
         card_input_mode: WikiCardInputMode | str = WikiCardInputMode.SUMMARY,
-        max_card_input_chars: int = 100000,
+        max_card_input_chars: int = 20000,
     ) -> PipelineArtifacts:
         if not docs:
             raise ValueError("Wiki pipeline requires at least one resource document")
@@ -373,7 +386,7 @@ class WikiPipeline:
         run_root = run_dir(self.config)
         run_config = {
             "pipeline_version": self.config.pipeline_version,
-            "model_config": self.config.vlm_config or {},
+            "model_config": _redact_sensitive_config(self.config.vlm_config or {}),
             "limits": asdict(self.config.limits),
         }
         await self.writer.write_json(f"{run_root}config.json", run_config)
@@ -406,6 +419,17 @@ def _source_documents_for_resource_refs(
             }
         )
     return source_documents
+
+
+def _redact_sensitive_config(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: "***REDACTED***" if str(key).lower() in _SENSITIVE_CONFIG_KEYS else _redact_sensitive_config(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_sensitive_config(item) for item in value]
+    return value
 
 
 def _child_node_document_inputs(

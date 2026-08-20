@@ -25,7 +25,7 @@ template: |
   - Do not create one parent node per child node.
   - Do not create broad catch-all or generic overview nodes.
   - Each parent node should be supported by at least min_child_nodes_per_parent distinct child nodes.
-  - A child node may support multiple parent nodes. Assign the same child title to every parent node it substantively supports.
+  - Each child node may support at most one parent node. Do not assign the same child title to multiple parent nodes.
   - supporting_child_titles must contain only title values from the input.
   - merged_child_topics must contain child node titles from the input that were merged into the parent node.
   - unassigned_child_titles only includes child nodes that do not substantively support any returned parent node.

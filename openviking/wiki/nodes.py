@@ -130,6 +130,7 @@ class NodeDiscoveryRunner:
             )
             for node, item in zip(nodes, response.nodes, strict=False)
         ]
+        _ensure_child_nodes_have_single_parent(assignments)
         unassigned_source_ids = _map_child_titles(
             response.unassigned_child_titles,
             title_to_node_id,
@@ -188,6 +189,20 @@ def _map_child_titles(
     if unknown_titles:
         raise RuntimeError(f"{field_name} references unknown child titles: {unknown_titles}")
     return list(dict.fromkeys(title_to_node_id[title] for title in titles))
+
+
+def _ensure_child_nodes_have_single_parent(assignments: list[SourceAssignmentItem]) -> None:
+    parent_by_child_id: dict[str, str] = {}
+    conflicts: dict[str, list[str]] = {}
+    for assignment in assignments:
+        for child_node_id in assignment.source_ids:
+            existing_parent_id = parent_by_child_id.get(child_node_id)
+            if existing_parent_id and existing_parent_id != assignment.node_id:
+                conflicts.setdefault(child_node_id, [existing_parent_id]).append(assignment.node_id)
+                continue
+            parent_by_child_id[child_node_id] = assignment.node_id
+    if conflicts:
+        raise RuntimeError(f"child nodes assigned to multiple parent nodes: {conflicts}")
 
 
 async def _complete_with_validation_retry(
