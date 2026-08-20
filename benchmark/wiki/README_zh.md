@@ -678,6 +678,39 @@ tail -f benchmark/wiki/.temp/openviking-server.log
 
 如果是 LLM 调用阶段，等待几分钟是正常的。只有看到明确异常栈、进程退出、或超过代码内 timeout，才按错误处理。
 
+## 支持的 13 组数据集实验
+
+除前文用于快速跑通流程的 Qasper 示例外，当前项目还为六个数据集提供了以下 13 组正式实验配置。每份 YAML 都可以直接传给 `benchmark/wiki/run.py --config`；同一数据集下语料范围相同的配置可以复用已经完成的文档入库、向量库和 Wiki。
+
+| 实验配置 | 数据集及范围 | QA 数 | 入库语料 |
+|---|---|---:|---:|
+| `PaperScope_summary/paperscope_summary_57_trend.yaml` | PaperScope Summary，`trend`，57 篇论文语料 | 117 | 57 个 PDF |
+| `PaperScope_summary/paperscope_summary_57_gap.yaml` | PaperScope Summary，`gap`，57 篇论文语料 | 119 | 57 个 PDF |
+| `PaperScope_summary/paperscope_summary_57_results_comparison.yaml` | PaperScope Summary，`results_comparison`，57 篇论文语料 | 116 | 57 个 PDF |
+| `PaperScope_summary/paperscope_summary_93_trend.yaml` | PaperScope Summary，`trend`，93 篇论文语料 | 117 | 93 个 PDF |
+| `PaperScope_summary/paperscope_summary_93_gap.yaml` | PaperScope Summary，`gap`，93 篇论文语料 | 119 | 93 个 PDF |
+| `PaperScope_summary/paperscope_summary_93_results_comparison.yaml` | PaperScope Summary，`results_comparison`，93 篇论文语料 | 116 | 93 个 PDF |
+| `MDAQA/mdaqa_first_100.yaml` | MDA-QA 前 100 条 QA | 100 | 143 个 PDF |
+| `WildGraphBench/wildgraphbench_summary_all.yaml` | WildGraphBench 全部 12 个主题的 Summary QA | 339 | 3,894 个 TXT |
+| `WildGraphBench/wildgraphbench_summary_health.yaml` | WildGraphBench Health 主题的 Summary QA | 55 | 509 个 TXT |
+| `ScholarQABench/scholarqa_multi_valid_101.yaml` | ScholarQA-Multi 中引用编号有效的 QA | 101 | 413 个合并 TXT |
+| `MuDABench/mudabench_simple.yaml` | MuDABench Simple QA，完整语料库 | 166 | 589 个 PDF |
+| `MuDABench/mudabench_complex.yaml` | MuDABench Complex QA，完整语料库 | 166 | 589 个 PDF |
+| `EnterpriseRAGBench/enterprise_rag_bench_selected_80.yaml` | EnterpriseRAG-Bench 的 Project Related、Conflicting Info、Completeness 三类 | 80 | 323 个 TXT |
+
+### Gold Answer 的统一处理
+
+不同数据集的原始答案字段和组织方式并不一致。对应 Adapter 会在加载 QA 时将它们转换为 `StandardQA.gold_answers`，以便继续复用 benchmark 现有的 token-level F1 和通用 LLM judge：
+
+- **PaperScope Summary**：将原始记录的 `answer` 直接作为唯一 gold answer，`evidence` 为空；`prompt_type`、`pdf_links` 和对应的论文 ID 等信息保留在 QA metadata 中。
+- **MDA-QA**：将 `answer` 直接作为唯一 gold answer，`evidence` 为空；`support` 中的论文 ID 会先与下载 manifest 核对，再保存在 QA metadata 中，并用于把依赖相同论文集合的 QA 分到同一个 `StandardSample`。
+- **WildGraphBench Summary**：一条 QA 的多个 `gold_statements` 不是多个可任选其一的答案。Adapter 会将它们合并成一个项目符号列表，作为唯一且完整的 gold answer，避免通用评测器把任意单条 statement 当成充分答案；原始 statement 列表和 `ref_urls` 仍保存在 QA metadata 中。
+- **ScholarQA-Multi**：每条 QA 只保留一个 gold answer。它由原始专家答案和零基的“引用编号 → 文献标题”对照表组成，用于消除 `[0]`、`[1]` 等引用标签的指代歧义；模型生成答案不需要复现这份对照表。可用的 `ctxs.text` 作为 evidence，原始专家答案、完整 `ctxs` 和引用映射保存在 QA metadata 中。
+- **MuDABench**：将 `final_answer` 直接作为唯一 gold answer，将 `source_answer` 中的文本作为 evidence。官方 Simple 和 Complex 文件中的两组完全重复 QA 不会去重，而是按原始行分别保留；关联文档 ID 和原始文档 metadata 同时保存在 QA metadata 中。
+- **EnterpriseRAG-Bench**：将 `gold_answer` 直接作为唯一 gold answer，将 `answer_facts` 作为 evidence。`expected_doc_ids` 会映射到实际提取的物理文档；对于同一逻辑 ID 对应两个不同文件的冲突样例，两个物理文件都会保留，并把完整映射写入 QA metadata。
+
+以上路径均相对于 `benchmark/wiki/config/`。其中 PaperScope 的三类 QA 在相同的 57 篇或 93 篇语料范围内共享文档存储；MuDABench Simple 与 Complex 共享完整的 589 篇 PDF。下面的“常用命令速查”进一步说明各数据集的下载、准备、导入、Wiki 构建和问答评测命令。
+
 ## 常用命令速查
 
 ### MDA-QA：前 100 条 QA
