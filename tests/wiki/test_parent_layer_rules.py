@@ -1,4 +1,6 @@
-from openviking.wiki.pipeline import _reject_nodes_with_insufficient_refs
+import pytest
+
+from openviking.wiki.pipeline import _assigned_child_contexts, _reject_nodes_with_insufficient_refs
 from openviking.wiki.schemas import (
     GeneratedNodeContext,
     NodeDocument,
@@ -8,9 +10,9 @@ from openviking.wiki.schemas import (
 )
 
 
-def test_parent_layer_allows_mixed_lower_depth_children_with_previous_layer_child():
+def test_parent_layer_keeps_parent_with_enough_child_nodes():
     parent = _node("parent", depth=3)
-    result = _assignment_result("parent", ["bottom_a", "middle_a", "bottom_b"])
+    result = _assignment_result("parent", ["child_a", "child_b", "child_c"])
 
     layer_nodes, active_nodes, filtered_result = _reject_nodes_with_insufficient_refs(
         [parent],
@@ -19,21 +21,21 @@ def test_parent_layer_allows_mixed_lower_depth_children_with_previous_layer_chil
         min_refs_per_node=1,
         min_child_nodes_per_parent=3,
         child_contexts=[
-            _context("bottom_a", "doc_1", depth=1),
-            _context("middle_a", "doc_2", depth=2),
-            _context("bottom_b", "doc_3", depth=1),
+            _context("child_a", "doc_1", depth=2),
+            _context("child_b", "doc_2", depth=2),
+            _context("child_c", "doc_3", depth=2),
         ],
-        required_child_contexts=[_context("middle_a", "doc_2", depth=2)],
+        depth=3,
     )
 
     assert active_nodes[0].status == "active"
-    assert layer_nodes[0].child_node_ids == ["bottom_a", "middle_a", "bottom_b"]
-    assert filtered_result.child_node_ids_by_node["parent"] == ["bottom_a", "middle_a", "bottom_b"]
+    assert layer_nodes[0].child_node_ids == ["child_a", "child_b", "child_c"]
+    assert filtered_result.child_node_ids_by_node["parent"] == ["child_a", "child_b", "child_c"]
 
 
-def test_parent_layer_rejects_parent_without_previous_layer_child():
+def test_parent_layer_rejects_parent_with_too_few_child_nodes():
     parent = _node("parent", depth=3)
-    result = _assignment_result("parent", ["bottom_a", "bottom_b", "bottom_c"])
+    result = _assignment_result("parent", ["child_a", "child_b"])
 
     layer_nodes, active_nodes, _ = _reject_nodes_with_insufficient_refs(
         [parent],
@@ -42,16 +44,26 @@ def test_parent_layer_rejects_parent_without_previous_layer_child():
         min_refs_per_node=1,
         min_child_nodes_per_parent=3,
         child_contexts=[
-            _context("bottom_a", "doc_1", depth=1),
-            _context("bottom_b", "doc_2", depth=1),
-            _context("bottom_c", "doc_3", depth=1),
-            _context("middle_a", "doc_4", depth=2),
+            _context("child_a", "doc_1", depth=2),
+            _context("child_b", "doc_2", depth=2),
         ],
-        required_child_contexts=[_context("middle_a", "doc_4", depth=2)],
+        depth=3,
     )
 
     assert active_nodes == []
     assert layer_nodes[0].status == "rejected"
+
+
+def test_parent_layer_requires_assigned_child_nodes_for_document_generation():
+    parent = _node("parent", depth=3)
+    result = SourceAssignmentResult(source_refs_by_node={})
+
+    with pytest.raises(RuntimeError, match="has no assigned child nodes"):
+        _assigned_child_contexts(
+            parent,
+            result,
+            [_context("child_a", "doc_1", depth=2)],
+        )
 
 
 def _assignment_result(node_id: str, child_node_ids: list[str]) -> SourceAssignmentResult:

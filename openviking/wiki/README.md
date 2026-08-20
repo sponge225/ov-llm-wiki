@@ -260,7 +260,7 @@ client.clear_wiki()
 4. 创建 `WikiVikingFSWriter` 和 `WikiContentLoader`。
 5. 调用 `WikiPipeline.run_from_inputs(...)`。
 
-`WikiService.clear_wiki(...)` 删除 `wiki_root_uri` 下的 Wiki 产物，默认是 `viking://wiki/`。清理接口固定幂等：目标不存在也返回成功。它只清理 Wiki 产物，不删除 `viking://resources/...` 下的原始入库文档、语义摘要、向量索引或 `.wiki_documents.json`。因此：
+`WikiService.clear_wiki(...)` 删除 `wiki_root_uri` 下的 Wiki 产物，默认是 `viking://wiki/`。底层 `VikingFS.rm(..., recursive=True)` 会联动清理这些 Wiki 文件对应的向量索引。清理接口固定幂等：目标不存在也返回成功。它不删除 `viking://resources/...` 下的原始入库文档、语义摘要、资源向量索引或 `.wiki_documents.json`。因此：
 
 ```text
 add_resource -> build_wiki -> clear_wiki
@@ -285,7 +285,7 @@ add_resource -> build_wiki -> clear_wiki
 
 | 参数 | 含义 | 默认值 |
 | --- | --- | --- |
-| `max_depth` | 最多生成几层 Wiki 节点 | `2` |
+| `max_depth` | 最多生成几层 Wiki 节点 | `6` |
 | `min_refs_per_node` | 底层节点最少需要多少个文档来源 | `3` |
 | `min_child_nodes_per_parent` | 父节点最少需要多少个子节点 | `3` |
 | `max_concurrent_cards` | Document Card 并发生成数 | `10` |

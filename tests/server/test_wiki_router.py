@@ -22,7 +22,7 @@ async def test_build_wiki_router_calls_service(monkeypatch):
             resource_uris=["viking://resources/demo"],
             wiki_root_uri="viking://wiki/",
             card_input_mode="summary",
-            max_card_input_chars=20000,
+            max_card_input_chars=100000,
         ),
         _ctx=object(),
     )

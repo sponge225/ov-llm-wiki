@@ -58,25 +58,13 @@ class WikiPipeline:
         self.content_generator = NodeContentGenerator(self.llm)
         self.layer_decision_runner = LayerDecisionRunner(self.llm)
 
-    async def run(self, docs: list[ResourceDocument]) -> PipelineArtifacts:
-        if not docs:
-            raise ValueError("Wiki pipeline requires at least one resource document")
-
-        artifacts = PipelineArtifacts()
-        await self.writer.ensure_dirs()
-
-        logger.info("[Wiki] Generating document cards for %d docs", len(docs))
-        cards = await self.card_generator.generate(docs)
-        logger.info("[Wiki] Generated %d document cards", len(cards))
-        return await self._run_from_cards(cards, artifacts, _resource_documents_by_id(docs))
-
     async def run_from_inputs(
         self,
         docs: list[WikiResourceInput],
         *,
         content_loader: WikiContentLoader,
         card_input_mode: WikiCardInputMode | str = WikiCardInputMode.SUMMARY,
-        max_card_input_chars: int = 20000,
+        max_card_input_chars: int = 100000,
     ) -> PipelineArtifacts:
         if not docs:
             raise ValueError("Wiki pipeline requires at least one resource document")
@@ -89,29 +77,47 @@ class WikiPipeline:
             len(docs),
             card_input_mode,
         )
-        resource_docs = [
-            await content_loader.load_document(
-                doc,
-                mode=card_input_mode,
-                max_card_input_chars=max_card_input_chars,
-            )
-            for doc in docs
-        ]
-        cards = await self.card_generator.generate(resource_docs)
-        source_docs = (
-            resource_docs
-            if WikiCardInputMode(card_input_mode) == WikiCardInputMode.RAW_CHUNK
-            else [
-                await content_loader.load_document(
-                    doc,
-                    mode=WikiCardInputMode.RAW_CHUNK,
-                    max_card_input_chars=max_card_input_chars,
-                )
-                for doc in docs
-            ]
+
+        input_mode = WikiCardInputMode(card_input_mode)
+        max_concurrent = max(1, self.config.limits.max_concurrent_cards)
+        sem = asyncio.Semaphore(max_concurrent)
+
+        async def _load_documents(mode: WikiCardInputMode) -> list[ResourceDocument]:
+            results: list[ResourceDocument | None] = [None] * len(docs)
+
+            async def _load_one(index: int, doc: WikiResourceInput) -> None:
+                async with sem:
+                    results[index] = await content_loader.load_document(
+                        doc,
+                        mode=mode,
+                        max_card_input_chars=max_card_input_chars,
+                    )
+
+            await asyncio.gather(*[_load_one(index, doc) for index, doc in enumerate(docs)])
+            if any(result is None for result in results):
+                raise RuntimeError("resource document loading did not produce all documents")
+            return [result for result in results if result is not None]
+
+        resource_docs = await _load_documents(input_mode)
+        source_docs_task = (
+            None
+            if input_mode == WikiCardInputMode.RAW_CHUNK
+            else asyncio.create_task(_load_documents(WikiCardInputMode.RAW_CHUNK))
         )
+        try:
+            cards = await self.card_generator.generate(resource_docs)
+        except Exception:
+            if source_docs_task is not None:
+                source_docs_task.cancel()
+                await asyncio.gather(source_docs_task, return_exceptions=True)
+            raise
+        source_docs = resource_docs if source_docs_task is None else await source_docs_task
         logger.info("[Wiki] Generated %d document cards", len(cards))
-        return await self._run_from_cards(cards, artifacts, _resource_documents_by_id(source_docs))
+        return await self._run_from_cards(
+            cards,
+            artifacts,
+            {doc.doc_id: doc for doc in source_docs},
+        )
 
     async def _run_from_cards(
         self,
@@ -199,8 +205,8 @@ class WikiPipeline:
                 assignment_result,
                 min_refs_per_node=self.config.limits.min_refs_per_node,
                 min_child_nodes_per_parent=self.config.limits.min_child_nodes_per_parent,
-                child_contexts=source_contexts if depth > 1 else None,
-                required_child_contexts=source_contexts if depth > 1 else None,
+                child_contexts=source_contexts,
+                depth=depth,
             )
             if not active_nodes:
                 if depth == 1:
@@ -379,10 +385,6 @@ class WikiPipeline:
         )
 
 
-def _resource_documents_by_id(docs: list[ResourceDocument]) -> dict[str, ResourceDocument]:
-    return {doc.doc_id: doc for doc in docs}
-
-
 def _source_documents_for_resource_refs(
     source_refs: list[SourceRef],
     resource_documents_by_id: dict[str, ResourceDocument],
@@ -392,13 +394,15 @@ def _source_documents_for_resource_refs(
         resource_document = resource_documents_by_id.get(source_ref.doc_id)
         if not resource_document:
             raise RuntimeError(f"node source ref has no loaded resource document: {source_ref.doc_id}")
+        if not resource_document.source_sections:
+            raise RuntimeError(f"node source ref has no source sections: {source_ref.doc_id}")
         source_documents.append(
             {
                 "doc_id": source_ref.doc_id,
-                "sections": _sections_from_content(
-                    resource_document.content_or_structure,
-                    fallback_uri=source_ref.resource_uri,
-                ),
+                "sections": [
+                    section.model_dump(mode="json")
+                    for section in resource_document.source_sections
+                ],
             }
         )
     return source_documents
@@ -426,39 +430,6 @@ def _child_node_document_inputs(
     return child_nodes
 
 
-def _sections_from_content(content: str, fallback_uri: str) -> list[dict]:
-    content = str(content or "").strip()
-    if not content:
-        raise RuntimeError(f"source document has no section content: {fallback_uri}")
-
-    sections: list[dict] = []
-    current_uri = ""
-    current_lines: list[str] = []
-    in_content = False
-
-    for line in content.splitlines():
-        if line.startswith("URI: "):
-            text = "\n".join(current_lines).strip()
-            if current_uri and text:
-                sections.append({"section_uri": current_uri, "content": text})
-            current_uri = line[5:].strip()
-            current_lines = []
-            in_content = False
-            continue
-        if line == "Content:":
-            in_content = True
-            continue
-        if in_content:
-            current_lines.append(line)
-
-    text = "\n".join(current_lines).strip()
-    if current_uri and text:
-        sections.append({"section_uri": current_uri, "content": text})
-    if sections:
-        return sections
-    return [{"section_uri": fallback_uri, "content": content}]
-
-
 def _reject_nodes_with_insufficient_refs(
     layer_nodes: list[WikiNode],
     active_nodes: list[WikiNode],
@@ -466,34 +437,36 @@ def _reject_nodes_with_insufficient_refs(
     min_refs_per_node: int,
     min_child_nodes_per_parent: int,
     child_contexts: list[GeneratedNodeContext] | None = None,
-    required_child_contexts: list[GeneratedNodeContext] | None = None,
+    *,
+    depth: int,
 ) -> tuple[list[WikiNode], list[WikiNode], SourceAssignmentResult]:
     min_refs = max(1, min_refs_per_node)
     min_child_nodes = max(1, min_child_nodes_per_parent)
-    child_doc_ids_by_node = {
-        context.node.node_id: {ref.doc_id for ref in context.source_refs}
-        for context in child_contexts or []
-    }
-    required_child_node_ids = {context.node.node_id for context in required_child_contexts or []}
+    is_parent_layer = depth > 1
+    if is_parent_layer and not child_contexts:
+        raise RuntimeError("parent layer requires child contexts")
+    child_doc_ids_by_node = (
+        {
+            context.node.node_id: {ref.doc_id for ref in context.source_refs}
+            for context in child_contexts or []
+        }
+        if is_parent_layer
+        else {}
+    )
     unsupported_node_ids = {
         node.node_id
         for node in active_nodes
         if (
-            _assigned_child_node_count(node.node_id, assignment_result, child_doc_ids_by_node) < min_child_nodes
-            or not _has_required_child_node(
-                node.node_id,
-                assignment_result,
-                child_doc_ids_by_node,
-                required_child_node_ids,
-            )
-            if child_doc_ids_by_node
+            len(_assigned_child_node_ids(node.node_id, assignment_result, child_doc_ids_by_node))
+            < min_child_nodes
+            if is_parent_layer
             else len(assignment_result.source_refs_by_node.get(node.node_id, [])) < min_refs
         )
     }
 
     updated_layer_nodes = [
         _with_assigned_child_node_ids(
-            _reject_node_for_insufficient_refs(node)
+            node.model_copy(update={"status": "rejected"})
             if node.node_id in unsupported_node_ids
             else node,
             assignment_result,
@@ -501,7 +474,7 @@ def _reject_nodes_with_insufficient_refs(
         )
         for node in layer_nodes
     ]
-    if not unsupported_node_ids and not child_doc_ids_by_node:
+    if not unsupported_node_ids and not is_parent_layer:
         return layer_nodes, active_nodes, assignment_result
 
     supported_node_ids = {
@@ -548,7 +521,7 @@ def _assigned_child_contexts(
 ) -> list[GeneratedNodeContext]:
     child_node_ids = set(assignment_result.child_node_ids_by_node.get(node.node_id) or node.child_node_ids)
     if not child_node_ids:
-        return child_contexts
+        raise RuntimeError(f"parent node {node.node_id} has no assigned child nodes")
     return [context for context in child_contexts if context.node.node_id in child_node_ids]
 
 
@@ -569,14 +542,6 @@ def _assign_parent_node_ids(
     ]
 
 
-def _assigned_child_node_count(
-    node_id: str,
-    assignment_result: SourceAssignmentResult,
-    child_doc_ids_by_node: dict[str, set[str]],
-) -> int:
-    return len(_assigned_child_node_ids(node_id, assignment_result, child_doc_ids_by_node))
-
-
 def _assigned_child_node_ids(
     node_id: str,
     assignment_result: SourceAssignmentResult,
@@ -590,21 +555,3 @@ def _assigned_child_node_ids(
         for ref in assignment_result.source_refs_by_node.get(node_id, [])
         if ref.ref_type == "wiki_node" and ref.doc_id in child_doc_ids_by_node
     ]
-
-
-def _has_required_child_node(
-    node_id: str,
-    assignment_result: SourceAssignmentResult,
-    child_doc_ids_by_node: dict[str, set[str]],
-    required_child_node_ids: set[str],
-) -> bool:
-    if not required_child_node_ids:
-        return True
-    assigned_child_node_ids = set(
-        _assigned_child_node_ids(node_id, assignment_result, child_doc_ids_by_node)
-    )
-    return bool(assigned_child_node_ids & required_child_node_ids)
-
-
-def _reject_node_for_insufficient_refs(node: WikiNode) -> WikiNode:
-    return node.model_copy(update={"status": "rejected"})

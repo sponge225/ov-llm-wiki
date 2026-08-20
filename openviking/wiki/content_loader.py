@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from .schemas import ResourceDocument, WikiResourceInput
+from .schemas import ResourceDocument, SourceSection, WikiResourceInput
 
 if TYPE_CHECKING:
     from openviking.server.identity import RequestContext
@@ -52,11 +52,13 @@ class WikiContentLoader:
                     "rerun after semantic generation succeeds or use raw_chunk mode"
                 )
         content = self._render_entries(entries, max_chars=max_card_input_chars)
+        source_sections = self._source_sections_from_entries(entries, max_chars=max_card_input_chars)
         return ResourceDocument(
             doc_id=doc.doc_id,
             resource_uri=doc.resource_uri,
             title=doc.title,
             content_or_structure=content,
+            source_sections=source_sections,
             metadata={
                 **doc.metadata,
                 "card_input_mode": input_mode.value,
@@ -93,6 +95,36 @@ class WikiContentLoader:
 
         await visit(root_uri, [root_uri.rstrip("/").rsplit("/", 1)[-1]])
         return entries
+
+    def _source_sections_from_entries(
+        self,
+        entries: list[dict[str, Any]],
+        *,
+        max_chars: int,
+    ) -> list[SourceSection]:
+        if not entries:
+            return []
+        max_chars = max(1000, int(max_chars or 100000))
+        raw_sections = [
+            (str(entry.get("uri") or "").strip(), str(entry.get("text") or "").strip())
+            for entry in entries
+        ]
+        raw_sections = [(uri, text) for uri, text in raw_sections if uri and text]
+        if not raw_sections:
+            return []
+
+        total_chars = sum(len(text) for _, text in raw_sections)
+        if total_chars <= max_chars:
+            return [
+                SourceSection(section_uri=uri, content=text)
+                for uri, text in raw_sections
+            ]
+
+        per_section_budget = max(400, max_chars // max(1, len(raw_sections)))
+        return [
+            SourceSection(section_uri=uri, content=self._clip(text, per_section_budget))
+            for uri, text in raw_sections
+        ]
 
     async def _append_leaf(
         self,

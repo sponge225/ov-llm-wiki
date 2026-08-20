@@ -9,7 +9,7 @@ from typing import Any
 @dataclass
 class WikiGenerationLimits:
     # 最多向上聚合多少层 Wiki 节点。
-    max_depth: int = 3
+    max_depth: int = 6
     # 父节点至少要覆盖多少个子节点，否则不会保留。
     min_child_nodes_per_parent: int = 3
     # 底层节点至少要绑定多少个来源引用，否则会被拒绝。
