@@ -72,12 +72,19 @@ class WikiResourceInput(StrictModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class SourceSection(StrictModel):
+    """节点正文生成使用的来源片段。"""
+    section_uri: NonEmptyStr
+    content: NonEmptyStr
+
+
 class ResourceDocument(StrictModel):
     """已加载好内容的资源文档，是生成 Document Card 时传给 LLM 的输入。"""
     doc_id: NonEmptyStr
     resource_uri: ResourceUri
     title: NonEmptyStr
     content_or_structure: str = ""
+    source_sections: list[SourceSection] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

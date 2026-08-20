@@ -3,7 +3,7 @@ import pytest
 from openviking.wiki.config import WikiConfig, WikiGenerationLimits
 from openviking.wiki.llm import WikiLLMRunner
 from openviking.wiki.pipeline import WikiPipeline
-from openviking.wiki.schemas import ResourceDocument
+from openviking.wiki.schemas import ResourceDocument, SourceSection, WikiResourceInput
 from openviking.wiki.writer import WikiVikingFSWriter
 
 from .fakes import FakeClient, FakeVLM
@@ -12,6 +12,7 @@ from .fakes import FakeClient, FakeVLM
 @pytest.mark.asyncio
 async def test_pipeline_generates_layer_content_before_next_layer_decision():
     docs = [_doc(index) for index in range(1, 4)]
+    wiki_inputs = [_wiki_input(doc) for doc in docs]
     fake_vlm = FakeVLM(
         [
             _card_content_response(1),
@@ -41,7 +42,10 @@ async def test_pipeline_generates_layer_content_before_next_layer_decision():
         content_writer=client,
     )
 
-    artifacts = await WikiPipeline(writer=writer, config=config, llm=llm).run(docs)
+    artifacts = await WikiPipeline(writer=writer, config=config, llm=llm).run_from_inputs(
+        wiki_inputs,
+        content_loader=FakeContentLoader(docs),
+    )
 
     assert [record.step for record in llm.log.raw_outputs] == [
         "doc_card",
@@ -60,6 +64,7 @@ async def test_pipeline_generates_layer_content_before_next_layer_decision():
 @pytest.mark.asyncio
 async def test_pipeline_does_not_precreate_unassigned_active_node_dirs():
     docs = [_doc(index) for index in range(1, 4)]
+    wiki_inputs = [_wiki_input(doc) for doc in docs]
     fake_vlm = FakeVLM(
         [
             _card_content_response(1),
@@ -104,7 +109,10 @@ async def test_pipeline_does_not_precreate_unassigned_active_node_dirs():
         content_writer=client,
     )
 
-    artifacts = await WikiPipeline(writer=writer, config=config, llm=llm).run(docs)
+    artifacts = await WikiPipeline(writer=writer, config=config, llm=llm).run_from_inputs(
+        wiki_inputs,
+        content_loader=FakeContentLoader(docs),
+    )
 
     assert "viking://wiki/nodes/question_answering/" in client.mkdirs
     assert "viking://wiki/nodes/unassigned_topic/" not in client.mkdirs
@@ -115,12 +123,42 @@ async def test_pipeline_does_not_precreate_unassigned_active_node_dirs():
 
 
 def _doc(index: int) -> ResourceDocument:
+    content = f"# Paper {index}\n\nContent about question answering."
     return ResourceDocument(
         doc_id=f"OARW_{index}",
         resource_uri=f"viking://resources/OARW_{index}/",
         title=f"Paper {index}",
-        content_or_structure=f"# Paper {index}\n\nContent about question answering.",
+        content_or_structure=content,
+        source_sections=[
+            SourceSection(
+                section_uri=f"viking://resources/OARW_{index}/",
+                content=content,
+            )
+        ],
     )
+
+
+def _wiki_input(doc: ResourceDocument) -> WikiResourceInput:
+    return WikiResourceInput(
+        doc_id=doc.doc_id,
+        resource_uri=doc.resource_uri,
+        title=doc.title,
+        document_dir_uri=doc.resource_uri,
+    )
+
+
+class FakeContentLoader:
+    def __init__(self, docs: list[ResourceDocument]):
+        self.docs_by_id = {doc.doc_id: doc for doc in docs}
+
+    async def load_document(
+        self,
+        doc: WikiResourceInput,
+        *,
+        mode: object,
+        max_card_input_chars: int,
+    ) -> ResourceDocument:
+        return self.docs_by_id[doc.doc_id]
 
 
 def _card_response(index: int) -> dict:
