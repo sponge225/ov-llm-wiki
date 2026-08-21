@@ -678,7 +678,298 @@ tail -f benchmark/wiki/.temp/openviking-server.log
 
 如果是 LLM 调用阶段，等待几分钟是正常的。只有看到明确异常栈、进程退出、或超过代码内 timeout，才按错误处理。
 
+## 支持的 13 组数据集实验
+
+除前文用于快速跑通流程的 Qasper 示例外，当前项目还为六个数据集提供了以下 13 组正式实验配置。每份 YAML 都可以直接传给 `benchmark/wiki/run.py --config`；同一数据集下语料范围相同的配置可以复用已经完成的文档入库、向量库和 Wiki。
+
+| 实验配置 | 数据集及范围 | QA 数 | 入库语料 |
+|---|---|---:|---:|
+| `PaperScope_summary/paperscope_summary_57_trend.yaml` | PaperScope Summary，`trend`，57 篇论文语料 | 117 | 57 个 PDF |
+| `PaperScope_summary/paperscope_summary_57_gap.yaml` | PaperScope Summary，`gap`，57 篇论文语料 | 119 | 57 个 PDF |
+| `PaperScope_summary/paperscope_summary_57_results_comparison.yaml` | PaperScope Summary，`results_comparison`，57 篇论文语料 | 116 | 57 个 PDF |
+| `PaperScope_summary/paperscope_summary_93_trend.yaml` | PaperScope Summary，`trend`，93 篇论文语料 | 117 | 93 个 PDF |
+| `PaperScope_summary/paperscope_summary_93_gap.yaml` | PaperScope Summary，`gap`，93 篇论文语料 | 119 | 93 个 PDF |
+| `PaperScope_summary/paperscope_summary_93_results_comparison.yaml` | PaperScope Summary，`results_comparison`，93 篇论文语料 | 116 | 93 个 PDF |
+| `MDAQA/mdaqa_first_100.yaml` | MDA-QA 前 100 条 QA | 100 | 143 个 PDF |
+| `WildGraphBench/wildgraphbench_summary_all.yaml` | WildGraphBench 全部 12 个主题的 Summary QA | 339 | 3,894 个 TXT |
+| `WildGraphBench/wildgraphbench_summary_health.yaml` | WildGraphBench Health 主题的 Summary QA | 55 | 509 个 TXT |
+| `ScholarQABench/scholarqa_multi_valid_101.yaml` | ScholarQA-Multi 中引用编号有效的 QA | 101 | 413 个合并 TXT |
+| `MuDABench/mudabench_simple.yaml` | MuDABench Simple QA，完整语料库 | 166 | 589 个 PDF |
+| `MuDABench/mudabench_complex.yaml` | MuDABench Complex QA，完整语料库 | 166 | 589 个 PDF |
+| `EnterpriseRAGBench/enterprise_rag_bench_selected_80.yaml` | EnterpriseRAG-Bench 的 Project Related、Conflicting Info、Completeness 三类 | 80 | 323 个 TXT |
+
+### Gold Answer 的统一处理
+
+不同数据集的原始答案字段和组织方式并不一致。对应 Adapter 会在加载 QA 时将它们转换为 `StandardQA.gold_answers`，以便继续复用 benchmark 现有的 token-level F1 和通用 LLM judge：
+
+- **PaperScope Summary**：将原始记录的 `answer` 直接作为唯一 gold answer，`evidence` 为空；`prompt_type`、`pdf_links` 和对应的论文 ID 等信息保留在 QA metadata 中。
+- **MDA-QA**：将 `answer` 直接作为唯一 gold answer，`evidence` 为空；`support` 中的论文 ID 会先与下载 manifest 核对，再保存在 QA metadata 中，并用于把依赖相同论文集合的 QA 分到同一个 `StandardSample`。
+- **WildGraphBench Summary**：一条 QA 的多个 `gold_statements` 不是多个可任选其一的答案。Adapter 会将它们合并成一个项目符号列表，作为唯一且完整的 gold answer，避免通用评测器把任意单条 statement 当成充分答案；原始 statement 列表和 `ref_urls` 仍保存在 QA metadata 中。
+- **ScholarQA-Multi**：每条 QA 只保留一个 gold answer。它由原始专家答案和零基的“引用编号 → 文献标题”对照表组成，用于消除 `[0]`、`[1]` 等引用标签的指代歧义；模型生成答案不需要复现这份对照表。可用的 `ctxs.text` 作为 evidence，原始专家答案、完整 `ctxs` 和引用映射保存在 QA metadata 中。
+- **MuDABench**：将 `final_answer` 直接作为唯一 gold answer，将 `source_answer` 中的文本作为 evidence。官方 Simple 和 Complex 文件中的两组完全重复 QA 不会去重，而是按原始行分别保留；关联文档 ID 和原始文档 metadata 同时保存在 QA metadata 中。
+- **EnterpriseRAG-Bench**：将 `gold_answer` 直接作为唯一 gold answer，将 `answer_facts` 作为 evidence。`expected_doc_ids` 会映射到实际提取的物理文档；对于同一逻辑 ID 对应两个不同文件的冲突样例，两个物理文件都会保留，并把完整映射写入 QA metadata。
+
+以上路径均相对于 `benchmark/wiki/config/`。其中 PaperScope 的三类 QA 在相同的 57 篇或 93 篇语料范围内共享文档存储；MuDABench Simple 与 Complex 共享完整的 589 篇 PDF。下面的“常用命令速查”进一步说明各数据集的下载、准备、导入、Wiki 构建和问答评测命令。
+
 ## 常用命令速查
+
+### MDA-QA：前 100 条 QA
+
+`MDAQAFirst100` 固定选择 MDA-QA 数据快照中的前 100 条记录（`id=0～99`），并只下载这些问题的 `support` 字段引用的 143 篇 arXiv PDF。QA 文件固定到 Hugging Face revision `7c4a4c374e3ff8298e9694648e0d793197a30814`，避免上游更新改变实验子集。实验语料采用 arXiv PDF 经 OpenViking 解析后的全文，不使用 SPIQA 预提取段落。
+
+下载并准备数据：
+
+```bash
+uv run python benchmark/wiki/scripts/prepare_dataset.py \
+  --dataset MDAQAFirst100 \
+  --download-dir benchmark/wiki/raw_data \
+  --output-dir benchmark/wiki/datasets
+```
+
+PDF 会缓存在 `benchmark/wiki/raw_data/MDAQA/pdf_cache/`。下载器串行访问 arXiv，并在 manifest 中记录每篇 PDF 的 SHA-256；再次运行时会复用已经验证的文件。
+
+将 143 篇论文导入资源库：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/MDAQA/mdaqa_first_100.yaml \
+  --step import
+```
+
+基于已导入的资源构建 Wiki：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/MDAQA/mdaqa_first_100.yaml \
+  --step build_wiki
+```
+
+执行全部 100 条 QA 并评测：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/MDAQA/mdaqa_first_100.yaml \
+  --step gen+eval
+```
+
+### PaperScope Summary：全部有效 QA
+
+PaperScope Summary 提供两种文档范围，但两者评测的是同一批 352 条有效 QA：
+
+- `PaperScopeSummary57`：只准备有效 QA 引用的 57 篇论文。
+- `PaperScopeSummary93`：准备原始 600 条 Summary 记录引用的全部 93 篇论文；额外 36 篇作为检索干扰文档。
+
+准备 57 篇版本：
+
+```bash
+uv run python benchmark/wiki/scripts/prepare_dataset.py \
+  --dataset PaperScopeSummary57 \
+  --download-dir benchmark/wiki/raw_data \
+  --output-dir benchmark/wiki/datasets
+```
+
+准备 93 篇版本：
+
+```bash
+uv run python benchmark/wiki/scripts/prepare_dataset.py \
+  --dataset PaperScopeSummary93 \
+  --download-dir benchmark/wiki/raw_data \
+  --output-dir benchmark/wiki/datasets
+```
+
+PDF 使用共享缓存。因此先准备 57 篇、再准备 93 篇时，只需下载新增论文。若 OpenReview 要求登录，脚本会交互式读取邮箱和隐藏密码，不会保存凭据。
+
+每个文档范围只需入库一次。例如先导入 57 篇论文：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/PaperScope_summary/paperscope_summary_57_trend.yaml \
+  --step import
+```
+
+然后基于已导入的资源构建 Wiki：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/PaperScope_summary/paperscope_summary_57_trend.yaml \
+  --step build_wiki
+```
+
+然后三种问题类型复用同一个 57 篇向量库：
+
+```bash
+uv run python benchmark/wiki/run.py --config benchmark/wiki/config/PaperScope_summary/paperscope_summary_57_trend.yaml --step gen+eval
+uv run python benchmark/wiki/run.py --config benchmark/wiki/config/PaperScope_summary/paperscope_summary_57_gap.yaml --step gen+eval
+uv run python benchmark/wiki/run.py --config benchmark/wiki/config/PaperScope_summary/paperscope_summary_57_results_comparison.yaml --step gen+eval
+```
+
+93 篇版本使用 `config/PaperScope_summary/` 下对应的 `paperscope_summary_93_*.yaml`，运行顺序相同。
+
+### WildGraphBench Summary
+
+WildGraphBench Summary 提供两个固定实验范围：
+
+- `WildGraphBenchSummaryAll`：入库12个主题下的3894篇 `reference_pages` TXT，运行全部339条 Summary QA。
+- `WildGraphBenchSummaryHealth`：只入库 Health 主题下的509篇 `reference_pages` TXT，运行该主题的55条 Summary QA。
+
+两个范围均使用固定的上游 Git revision，且不接受 `--sample-size` 或 `--num-docs`。准备全部主题：
+
+```bash
+uv run python benchmark/wiki/scripts/prepare_dataset.py \
+  --dataset WildGraphBenchSummaryAll \
+  --download-dir benchmark/wiki/raw_data \
+  --output-dir benchmark/wiki/datasets
+```
+
+只准备 Health：
+
+```bash
+uv run python benchmark/wiki/scripts/prepare_dataset.py \
+  --dataset WildGraphBenchSummaryHealth \
+  --download-dir benchmark/wiki/raw_data \
+  --output-dir benchmark/wiki/datasets
+```
+
+运行相应实验：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/WildGraphBench/wildgraphbench_summary_all.yaml \
+  --step all
+
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/WildGraphBench/wildgraphbench_summary_health.yaml \
+  --step all
+```
+
+Adapter 会把每条 QA 的多个 `gold_statements` 合并为一个完整标准答案，以便继续使用项目现有的通用 F1 和 LLM judge；原始陈述列表与 `ref_urls` 仍保留在 QA metadata 中。该结果不是 WildGraphBench 官方陈述级指标。
+
+### ScholarQA-Multi：101 条有效 QA
+
+`ScholarQAMultiValid101` 固定使用 ScholarQABench revision `95e6fc52b0a8a0ce0a74956029991e3bb00c38b9`。原始 ScholarQA-Multi 有 108 条专家 QA；其中 7 条答案含有超出各自 `ctxs` 范围的引用编号，因此固定排除，保留 101 条有效 QA。有效 QA 按 `subject` 形成 6 个 `StandardSample`，但共同检索同一份语料库。
+
+本实验不下载论文 PDF。Adapter 使用官方 `ctxs` 引用片段：优先按 Semantic Scholar Paper URL 合并，没有 URL 时按规范化论文标题合并，最终生成 413 份 TXT 文档。每份 TXT 保存标题、作者、年份、来源 URL，以及去重后的官方引用片段。上游有 2 个被引用来源的 `text` 为 `NaN`；对应 TXT 仅保留可用的文献元数据，不伪造片段，也不把 `NaN` 加入 QA evidence。
+
+下载并准备数据：
+
+```bash
+uv run python benchmark/wiki/scripts/prepare_dataset.py \
+  --dataset ScholarQAMultiValid101 \
+  --download-dir benchmark/wiki/raw_data \
+  --output-dir benchmark/wiki/datasets
+```
+
+导入 413 份引用片段文档、构建 Wiki、运行 101 条 QA 并评测：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/ScholarQABench/scholarqa_multi_valid_101.yaml \
+  --step import
+
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/ScholarQABench/scholarqa_multi_valid_101.yaml \
+  --step build_wiki
+
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/ScholarQABench/scholarqa_multi_valid_101.yaml \
+  --step gen+eval
+```
+
+每个 `gold_answers` 只保存一个答案：原始专家答案后附零基引用编号到论文标题的对照表，以消除 `[0]`、`[1]` 等标签的指代歧义。原始专家答案、完整 `ctxs` 和引用映射也保留在 QA metadata 中。实验继续使用项目现有通用评价指标，不启用 ScholarQABench 官方 Prometheus 或引用正确性指标。
+
+### MuDABench：Simple 与 Complex
+
+MuDABench 提供两个固定实验范围：
+
+- `MuDABenchSimple`：运行官方 `simple.json` 的全部 166 条 QA。
+- `MuDABenchComplex`：运行官方 `complex.json` 的全部 166 条 QA。
+
+数据固定到 Hugging Face revision `af2360876c0b8789e2ca1af9d648f9370eb52600`。两个范围都完整使用官方 589 份金融 PDF，语料集合完全相同，大小约为 3.78 GiB。PDF 缓存在 `benchmark/wiki/raw_data/MuDABench/pdf_cache/`，并通过官方 LFS SHA-256 和文件大小校验；两个准备目录优先使用硬链接复用缓存文件，在同一文件系统中不会重复占用相同文件内容的磁盘空间。
+
+两个 QA 文件各有 166 行和 164 个唯一 `question_id`，其中两组 QA 是官方文件中的完全重复记录。Adapter 按官方发布口径保留全部 166 行，并通过全局查询序号区分重复记录。`final_answer` 直接作为唯一 gold answer，`source_answer` 作为 evidence；评测继续使用项目现有 F1 和通用 LLM judge，不接入 MuDABench 官方 evaluator。
+
+先准备 Simple；这一步会下载完整 589-PDF 语料：
+
+```bash
+uv run python benchmark/wiki/scripts/prepare_dataset.py \
+  --dataset MuDABenchSimple \
+  --download-dir benchmark/wiki/raw_data \
+  --output-dir benchmark/wiki/datasets
+```
+
+再准备 Complex；已验证的 PDF 会从共享缓存复用：
+
+```bash
+uv run python benchmark/wiki/scripts/prepare_dataset.py \
+  --dataset MuDABenchComplex \
+  --download-dir benchmark/wiki/raw_data \
+  --output-dir benchmark/wiki/datasets
+```
+
+两份配置共享 `mudabench_589` 文档处理目录、向量库和 Wiki，因此只需要使用任意一个配置执行一次导入和 Wiki 构建。例如：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/MuDABench/mudabench_simple.yaml \
+  --step import
+
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/MuDABench/mudabench_simple.yaml \
+  --step build_wiki
+```
+
+然后分别运行两类 QA：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/MuDABench/mudabench_simple.yaml \
+  --step gen+eval
+
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/MuDABench/mudabench_complex.yaml \
+  --step gen+eval
+```
+
+MuDABench 官方说明指出，远程监督标注和文档覆盖限制可能导致部分问题不可回答，并建议优先关注年报类任务。当前适配为了保持完整 Simple/Complex 实验口径，不额外过滤这些记录。
+
+### EnterpriseRAG-Bench：三个类别的 80 条 QA
+
+`EnterpriseRAGBenchSelected80` 固定使用 EnterpriseRAG-Bench `v1.0.0` Release，只运行以下三个类别：
+
+- `project_related`：40 条 QA。
+- `conflicting_info`：20 条 QA。
+- `completeness`：20 条 QA。
+
+三类合计 80 条 QA，引用 322 个不同的逻辑 `doc_id`。其中 `qst_0413` 故意引用两个 `doc_id` 相同、内容和文件名不同的 Jira 文档；下载器和 Adapter 不按逻辑 ID 粗略去重，而是保留两个物理文件。因此共享语料库实际包含 323 份 TXT 文档。
+
+准备数据时会下载官方 `questions.jsonl` 和约 1.17 GiB 的 `all_documents.zip`。完整压缩包固定缓存在 `benchmark/wiki/raw_data/EnterpriseRAGBench/v1.0.0/`，但只从中提取并准备上述 80 条 QA 对应的 323 份 TXT，不会把其余 50 多万份文档入库。下载文件通过官方 Release 的大小与 SHA-256 校验。
+
+下载并准备固定范围：
+
+```bash
+uv run python benchmark/wiki/scripts/prepare_dataset.py \
+  --dataset EnterpriseRAGBenchSelected80 \
+  --download-dir benchmark/wiki/raw_data \
+  --output-dir benchmark/wiki/datasets
+```
+
+导入 323 份 TXT、构建 Wiki、运行 80 条 QA 并评测：
+
+```bash
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/EnterpriseRAGBench/enterprise_rag_bench_selected_80.yaml \
+  --step import
+
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/EnterpriseRAGBench/enterprise_rag_bench_selected_80.yaml \
+  --step build_wiki
+
+uv run python benchmark/wiki/run.py \
+  --config benchmark/wiki/config/EnterpriseRAGBench/enterprise_rag_bench_selected_80.yaml \
+  --step gen+eval
+```
+
+Adapter 将官方 `gold_answer` 直接作为唯一 gold answer，将 `answer_facts` 保存为 evidence，同时在 metadata 中保留原始 `expected_doc_ids`、物理文件映射和来源类型。评测继续使用项目现有 F1 和通用 LLM judge，不接入 EnterpriseRAG-Bench 官方评价器。
 
 下载并生成 Qasper 示例数据：
 

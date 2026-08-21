@@ -1146,11 +1146,246 @@ def sample_financebench(
     return metadata
 
 
+def sample_paperscope_summary_57(
+    input_dir: Path,
+    output_dir: Path,
+    sample_size: Optional[int] = None,
+    num_docs: Optional[int] = None,
+    seed: int = 42,
+    sample_mode: str = "random",
+) -> Dict[str, Any]:
+    """Prepare all valid PaperScope Summary QA with the 57-paper corpus."""
+    if sample_size is not None or num_docs is not None:
+        raise ValueError("PaperScopeSummary57 only supports the full valid QA set")
+    try:
+        from .dataset_handlers.paperscope_summary import prepare_paperscope_summary
+    except ImportError:
+        from dataset_handlers.paperscope_summary import prepare_paperscope_summary
+
+    return prepare_paperscope_summary(
+        input_dir, output_dir, document_scope="valid"
+    )
+
+
+def sample_paperscope_summary_93(
+    input_dir: Path,
+    output_dir: Path,
+    sample_size: Optional[int] = None,
+    num_docs: Optional[int] = None,
+    seed: int = 42,
+    sample_mode: str = "random",
+) -> Dict[str, Any]:
+    """Prepare all valid PaperScope Summary QA with the 93-paper corpus."""
+    if sample_size is not None or num_docs is not None:
+        raise ValueError("PaperScopeSummary93 only supports the full valid QA set")
+    try:
+        from .dataset_handlers.paperscope_summary import prepare_paperscope_summary
+    except ImportError:
+        from dataset_handlers.paperscope_summary import prepare_paperscope_summary
+
+    return prepare_paperscope_summary(
+        input_dir, output_dir, document_scope="all"
+    )
+
+
+def sample_mdaqa_first_100(
+    input_dir: Path,
+    output_dir: Path,
+    sample_size: Optional[int] = None,
+    num_docs: Optional[int] = None,
+    seed: int = 42,
+    sample_mode: str = "random",
+) -> Dict[str, Any]:
+    """Prepare the fixed first 100 MDA-QA records and their 143 papers."""
+    if sample_size is not None or num_docs is not None:
+        raise ValueError(
+            "MDAQAFirst100 is a fixed subset and does not accept sampling options"
+        )
+    try:
+        from .dataset_handlers.mdaqa import prepare_mdaqa_first_100
+    except ImportError:
+        from dataset_handlers.mdaqa import prepare_mdaqa_first_100
+
+    return prepare_mdaqa_first_100(input_dir, output_dir)
+
+
+def _sample_wildgraphbench_summary(
+    input_dir: Path,
+    output_dir: Path,
+    *,
+    scope: str,
+    sample_size: Optional[int],
+    num_docs: Optional[int],
+) -> Dict[str, Any]:
+    if sample_size is not None or num_docs is not None:
+        raise ValueError(
+            "WildGraphBench Summary scopes are fixed and do not accept sampling options"
+        )
+    try:
+        from .dataset_handlers.wildgraphbench import prepare_wildgraphbench_summary
+    except ImportError:
+        from dataset_handlers.wildgraphbench import prepare_wildgraphbench_summary
+
+    return prepare_wildgraphbench_summary(input_dir, output_dir, scope=scope)
+
+
+def sample_wildgraphbench_summary_all(
+    input_dir: Path,
+    output_dir: Path,
+    sample_size: Optional[int] = None,
+    num_docs: Optional[int] = None,
+    seed: int = 42,
+    sample_mode: str = "random",
+) -> Dict[str, Any]:
+    """Prepare all reference pages and all Summary questions."""
+    return _sample_wildgraphbench_summary(
+        input_dir,
+        output_dir,
+        scope="all",
+        sample_size=sample_size,
+        num_docs=num_docs,
+    )
+
+
+def sample_wildgraphbench_summary_health(
+    input_dir: Path,
+    output_dir: Path,
+    sample_size: Optional[int] = None,
+    num_docs: Optional[int] = None,
+    seed: int = 42,
+    sample_mode: str = "random",
+) -> Dict[str, Any]:
+    """Prepare Health reference pages and Health Summary questions."""
+    return _sample_wildgraphbench_summary(
+        input_dir,
+        output_dir,
+        scope="health",
+        sample_size=sample_size,
+        num_docs=num_docs,
+    )
+
+
+def sample_scholarqa_multi_valid_101(
+    input_dir: Path,
+    output_dir: Path,
+    sample_size: Optional[int] = None,
+    num_docs: Optional[int] = None,
+    seed: int = 42,
+    sample_mode: str = "random",
+) -> Dict[str, Any]:
+    """Prepare the fixed ScholarQA-Multi valid subset and merged snippet corpus."""
+    if sample_size is not None or num_docs is not None:
+        raise ValueError(
+            "ScholarQAMultiValid101 is a fixed subset and does not accept sampling options"
+        )
+    try:
+        from .dataset_handlers.scholarqa_multi import (
+            prepare_scholarqa_multi_valid_101,
+        )
+    except ImportError:
+        from dataset_handlers.scholarqa_multi import (
+            prepare_scholarqa_multi_valid_101,
+        )
+
+    return prepare_scholarqa_multi_valid_101(input_dir, output_dir)
+
+
+def _sample_mudabench(
+    input_dir: Path,
+    output_dir: Path,
+    *,
+    scope: str,
+    sample_size: Optional[int],
+    num_docs: Optional[int],
+) -> Dict[str, Any]:
+    if sample_size is not None or num_docs is not None:
+        raise ValueError(
+            "MuDABench scopes are fixed and do not accept sampling options"
+        )
+    try:
+        from .dataset_handlers.mudabench import prepare_mudabench
+    except ImportError:
+        from dataset_handlers.mudabench import prepare_mudabench
+
+    return prepare_mudabench(input_dir, output_dir, scope=scope)
+
+
+def sample_mudabench_simple(
+    input_dir: Path,
+    output_dir: Path,
+    sample_size: Optional[int] = None,
+    num_docs: Optional[int] = None,
+    seed: int = 42,
+    sample_mode: str = "random",
+) -> Dict[str, Any]:
+    """Prepare all 166 Simple QA with the complete 589-PDF corpus."""
+    return _sample_mudabench(
+        input_dir,
+        output_dir,
+        scope="simple",
+        sample_size=sample_size,
+        num_docs=num_docs,
+    )
+
+
+def sample_mudabench_complex(
+    input_dir: Path,
+    output_dir: Path,
+    sample_size: Optional[int] = None,
+    num_docs: Optional[int] = None,
+    seed: int = 42,
+    sample_mode: str = "random",
+) -> Dict[str, Any]:
+    """Prepare all 166 Complex QA with the complete 589-PDF corpus."""
+    return _sample_mudabench(
+        input_dir,
+        output_dir,
+        scope="complex",
+        sample_size=sample_size,
+        num_docs=num_docs,
+    )
+
+
+def sample_enterprise_rag_bench_selected_80(
+    input_dir: Path,
+    output_dir: Path,
+    sample_size: Optional[int] = None,
+    num_docs: Optional[int] = None,
+    seed: int = 42,
+    sample_mode: str = "random",
+) -> Dict[str, Any]:
+    """Prepare the fixed three-category EnterpriseRAG-Bench scope."""
+    if sample_size is not None or num_docs is not None:
+        raise ValueError(
+            "EnterpriseRAGBenchSelected80 is a fixed subset and does not accept "
+            "sampling options"
+        )
+    try:
+        from .dataset_handlers.enterprise_rag_bench import (
+            prepare_enterprise_rag_bench_selected_80,
+        )
+    except ImportError:
+        from dataset_handlers.enterprise_rag_bench import (
+            prepare_enterprise_rag_bench_selected_80,
+        )
+
+    return prepare_enterprise_rag_bench_selected_80(input_dir, output_dir)
+
+
 DATASET_SAMPLERS = {
     "Locomo": sample_locomo,
     "SyllabusQA": sample_syllabusqa,
     "Qasper": sample_qasper,
     "FinanceBench": sample_financebench,
+    "PaperScopeSummary57": sample_paperscope_summary_57,
+    "PaperScopeSummary93": sample_paperscope_summary_93,
+    "MDAQAFirst100": sample_mdaqa_first_100,
+    "WildGraphBenchSummaryAll": sample_wildgraphbench_summary_all,
+    "WildGraphBenchSummaryHealth": sample_wildgraphbench_summary_health,
+    "ScholarQAMultiValid101": sample_scholarqa_multi_valid_101,
+    "MuDABenchSimple": sample_mudabench_simple,
+    "MuDABenchComplex": sample_mudabench_complex,
+    "EnterpriseRAGBenchSelected80": sample_enterprise_rag_bench_selected_80,
 }
 
 

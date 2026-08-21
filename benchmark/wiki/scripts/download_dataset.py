@@ -61,6 +61,70 @@ DATASET_SOURCES = {
         ],
         "extract_subdir": "financebench-main",
     },
+    "PaperScopeSummary57": {
+        "source_type": "paperscope_summary",
+        "document_scope": "valid",
+        "files": ["summary_corpus_1.jsonl", "documents.jsonl", "pdfs/"],
+    },
+    "PaperScopeSummary93": {
+        "source_type": "paperscope_summary",
+        "document_scope": "all",
+        "files": ["summary_corpus_1.jsonl", "documents.jsonl", "pdfs/"],
+    },
+    "MDAQAFirst100": {
+        "source_type": "mdaqa_first_100",
+        "files": ["MDA-QA.json", "documents.jsonl", "pdfs/"],
+    },
+    "WildGraphBenchSummaryAll": {
+        "source_type": "wildgraphbench_summary",
+        "scope": "all",
+        "files": [
+            "summary_questions.jsonl",
+            "documents.jsonl",
+            "dataset_info.json",
+            "reference_pages/",
+        ],
+    },
+    "WildGraphBenchSummaryHealth": {
+        "source_type": "wildgraphbench_summary",
+        "scope": "health",
+        "files": [
+            "summary_questions.jsonl",
+            "documents.jsonl",
+            "dataset_info.json",
+            "reference_pages/",
+        ],
+    },
+    "ScholarQAMultiValid101": {
+        "source_type": "scholarqa_multi",
+        "files": [
+            "human_answers.json",
+            "scholarqa_multi_valid_101.json",
+            "documents.jsonl",
+            "dataset_info.json",
+            "reference_documents/",
+        ],
+    },
+    "MuDABenchSimple": {
+        "source_type": "mudabench",
+        "scope": "simple",
+        "files": ["simple.json", "documents.jsonl", "dataset_info.json", "pdfs/"],
+    },
+    "MuDABenchComplex": {
+        "source_type": "mudabench",
+        "scope": "complex",
+        "files": ["complex.json", "documents.jsonl", "dataset_info.json", "pdfs/"],
+    },
+    "EnterpriseRAGBenchSelected80": {
+        "source_type": "enterprise_rag_bench",
+        "files": [
+            "questions.jsonl",
+            "questions_selected_80.jsonl",
+            "documents.jsonl",
+            "dataset_info.json",
+            "reference_documents/",
+        ],
+    },
 }
 
 
@@ -175,6 +239,88 @@ def verify_dataset(dataset_name: str, dataset_dir: Path) -> bool:
         return False
 
     source = DATASET_SOURCES[dataset_name]
+    if source.get("source_type") == "paperscope_summary":
+        try:
+            from .dataset_handlers.paperscope_summary import verify_paperscope_download
+        except ImportError:
+            from dataset_handlers.paperscope_summary import verify_paperscope_download
+
+        valid = verify_paperscope_download(dataset_dir, source["document_scope"])
+        if valid:
+            print(f"✓ {dataset_name} verified successfully")
+        else:
+            print(f"PaperScope download verification failed: {dataset_dir}")
+        return valid
+
+    if source.get("source_type") == "mdaqa_first_100":
+        try:
+            from .dataset_handlers.mdaqa import verify_mdaqa_download
+        except ImportError:
+            from dataset_handlers.mdaqa import verify_mdaqa_download
+
+        valid = verify_mdaqa_download(dataset_dir)
+        if valid:
+            print(f"✓ {dataset_name} verified successfully")
+        else:
+            print(f"MDA-QA download verification failed: {dataset_dir}")
+        return valid
+
+    if source.get("source_type") == "wildgraphbench_summary":
+        try:
+            from .dataset_handlers.wildgraphbench import verify_wildgraphbench_download
+        except ImportError:
+            from dataset_handlers.wildgraphbench import verify_wildgraphbench_download
+
+        valid = verify_wildgraphbench_download(dataset_dir, source["scope"])
+        if valid:
+            print(f"✓ {dataset_name} verified successfully")
+        else:
+            print(f"WildGraphBench download verification failed: {dataset_dir}")
+        return valid
+
+    if source.get("source_type") == "scholarqa_multi":
+        try:
+            from .dataset_handlers.scholarqa_multi import verify_scholarqa_multi_download
+        except ImportError:
+            from dataset_handlers.scholarqa_multi import verify_scholarqa_multi_download
+
+        valid = verify_scholarqa_multi_download(dataset_dir)
+        if valid:
+            print(f"✓ {dataset_name} verified successfully")
+        else:
+            print(f"ScholarQA-Multi download verification failed: {dataset_dir}")
+        return valid
+
+    if source.get("source_type") == "mudabench":
+        try:
+            from .dataset_handlers.mudabench import verify_mudabench_download
+        except ImportError:
+            from dataset_handlers.mudabench import verify_mudabench_download
+
+        valid = verify_mudabench_download(dataset_dir, source["scope"])
+        if valid:
+            print(f"✓ {dataset_name} verified successfully")
+        else:
+            print(f"MuDABench download verification failed: {dataset_dir}")
+        return valid
+
+    if source.get("source_type") == "enterprise_rag_bench":
+        try:
+            from .dataset_handlers.enterprise_rag_bench import (
+                verify_enterprise_rag_bench_download,
+            )
+        except ImportError:
+            from dataset_handlers.enterprise_rag_bench import (
+                verify_enterprise_rag_bench_download,
+            )
+
+        valid = verify_enterprise_rag_bench_download(dataset_dir)
+        if valid:
+            print(f"✓ {dataset_name} verified successfully")
+        else:
+            print(f"EnterpriseRAG-Bench download verification failed: {dataset_dir}")
+        return valid
+
     missing_files = []
 
     for file_path in source["files"]:
@@ -272,6 +418,95 @@ def download_dataset(
 
     source = DATASET_SOURCES[dataset_name]
     dataset_dir = output_dir / dataset_name
+
+    if source.get("source_type") == "paperscope_summary":
+        try:
+            from .dataset_handlers.paperscope_summary import download_paperscope_summary
+        except ImportError:
+            from dataset_handlers.paperscope_summary import download_paperscope_summary
+
+        return download_paperscope_summary(
+            output_dir=output_dir,
+            dataset_name=dataset_name,
+            document_scope=source["document_scope"],
+            force=force,
+            verify=verify,
+        )
+
+    if source.get("source_type") == "mdaqa_first_100":
+        try:
+            from .dataset_handlers.mdaqa import download_mdaqa_first_100
+        except ImportError:
+            from dataset_handlers.mdaqa import download_mdaqa_first_100
+
+        return download_mdaqa_first_100(
+            output_dir=output_dir,
+            dataset_name=dataset_name,
+            force=force,
+            verify=verify,
+        )
+
+    if source.get("source_type") == "wildgraphbench_summary":
+        try:
+            from .dataset_handlers.wildgraphbench import download_wildgraphbench_summary
+        except ImportError:
+            from dataset_handlers.wildgraphbench import download_wildgraphbench_summary
+
+        return download_wildgraphbench_summary(
+            output_dir=output_dir,
+            dataset_name=dataset_name,
+            scope=source["scope"],
+            force=force,
+            verify=verify,
+        )
+
+    if source.get("source_type") == "scholarqa_multi":
+        try:
+            from .dataset_handlers.scholarqa_multi import (
+                download_scholarqa_multi_valid_101,
+            )
+        except ImportError:
+            from dataset_handlers.scholarqa_multi import (
+                download_scholarqa_multi_valid_101,
+            )
+
+        return download_scholarqa_multi_valid_101(
+            output_dir=output_dir,
+            dataset_name=dataset_name,
+            force=force,
+            verify=verify,
+        )
+
+    if source.get("source_type") == "mudabench":
+        try:
+            from .dataset_handlers.mudabench import download_mudabench
+        except ImportError:
+            from dataset_handlers.mudabench import download_mudabench
+
+        return download_mudabench(
+            output_dir=output_dir,
+            dataset_name=dataset_name,
+            scope=source["scope"],
+            force=force,
+            verify=verify,
+        )
+
+    if source.get("source_type") == "enterprise_rag_bench":
+        try:
+            from .dataset_handlers.enterprise_rag_bench import (
+                download_enterprise_rag_bench_selected_80,
+            )
+        except ImportError:
+            from dataset_handlers.enterprise_rag_bench import (
+                download_enterprise_rag_bench_selected_80,
+            )
+
+        return download_enterprise_rag_bench_selected_80(
+            output_dir=output_dir,
+            dataset_name=dataset_name,
+            force=force,
+            verify=verify,
+        )
 
     if dataset_dir.exists() and not force:
         print(f"{dataset_name} already exists at {dataset_dir}, skipping download")
