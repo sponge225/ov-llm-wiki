@@ -81,7 +81,7 @@ class SourceSection(StrictModel):
 class ResourceDocument(StrictModel):
     """已加载好内容的资源文档，是生成 Document Card 时传给 LLM 的输入。"""
     doc_id: NonEmptyStr
-    resource_uri: ResourceUri
+    resource_uri: SourceUri
     title: NonEmptyStr
     content_or_structure: str = ""
     source_sections: list[SourceSection] = Field(default_factory=list)
@@ -97,21 +97,21 @@ class DocumentCardContent(StrictModel):
 
 
 class DocumentCard(DocumentCardContent):
-    """单篇资源文档的结构化卡片，是后续画像、节点发现和来源分配的基础输入。"""
+    """来源文档或 Wiki 节点的结构化卡片，是后续节点发现和来源分配的基础输入。"""
     doc_id: NonEmptyStr
-    resource_uri: ResourceUri
+    resource_uri: SourceUri
     title: NonEmptyStr
     markdown: str = ""
 
 
 class WikiNode(StrictModel):
-    """Wiki 目录树中的内部节点，保存稳定标识、主题边界和层级关系。"""
+    """Wiki 目录图中的内部节点，保存稳定标识、主题边界和层级关系。"""
     node_id: NodeId
     title: NonEmptyStr
     status: Literal["active", "rejected"] = "active"
     depth: int = Field(ge=1)
     scope: NonEmptyStr
-    parent_node_id: str | None = None
+    parent_node_ids: list[str] = Field(default_factory=list)
     child_node_ids: list[str] = Field(default_factory=list)
 
 
@@ -121,28 +121,16 @@ class WikiNodeDiscoveryItem(StrictModel):
     scope: NonEmptyStr = Field(description="节点覆盖的知识范围及明确排除的内容")
 
 
-class WikiBottomNodeDiscoveryItem(WikiNodeDiscoveryItem):
-    """底层节点聚合结果，同时给出支撑该节点的文档。"""
-    supporting_doc_ids: NonEmptyStrList
+class WikiSourceNodeDiscoveryItem(WikiNodeDiscoveryItem):
+    """来源 card 聚合结果，同时给出支撑该节点的来源 ID。"""
+    supporting_source_ids: NonEmptyStrList
     merged_candidate_topics: list[str] = Field(default_factory=list)
 
 
-class WikiBottomNodeDiscoveryResponse(StrictModel):
-    """底层节点聚合步骤的结构化响应，包含节点和文档归属关系。"""
-    nodes: list[WikiBottomNodeDiscoveryItem]
-    unassigned_doc_ids: list[str] = Field(default_factory=list)
-
-
-class WikiParentNodeDiscoveryItem(WikiNodeDiscoveryItem):
-    """父层节点聚合结果，同时给出支撑该父节点的子节点标题。"""
-    supporting_child_titles: NonEmptyStrList
-    merged_child_topics: list[str] = Field(default_factory=list)
-
-
-class WikiParentNodeDiscoveryResponse(StrictModel):
-    """父层节点聚合步骤的结构化响应，包含父节点和子节点归属关系。"""
-    nodes: list[WikiParentNodeDiscoveryItem]
-    unassigned_child_titles: list[str] = Field(default_factory=list)
+class WikiSourceNodeDiscoveryResponse(StrictModel):
+    """节点聚合步骤的结构化响应，包含节点和来源归属关系。"""
+    nodes: list[WikiSourceNodeDiscoveryItem]
+    unassigned_source_ids: list[str] = Field(default_factory=list)
 
 
 class SourceRef(StrictModel):
@@ -160,7 +148,6 @@ class SourceRef(StrictModel):
 class SourceAssignmentResult(StrictModel):
     """来源分配阶段的完整结果，按节点组织可引用来源并记录未分配来源。"""
     source_refs_by_node: dict[str, list[SourceRef]]
-    child_node_ids_by_node: dict[str, list[str]] = Field(default_factory=dict)
     unassigned_source_ids: list[str] = Field(default_factory=list)
 
 
@@ -188,11 +175,6 @@ class NodeDocument(NodeDocumentContent):
     document_id: NonEmptyStr
 
 
-class NodeMarkdownResponse(StrictModel):
-    """node.md 生成步骤的结构化响应。"""
-    node_md: NonEmptyStr
-
-
 class NodeDocumentsResponse(StrictModel):
     """节点正文生成步骤的结构化响应。"""
     documents: list[NodeDocumentContent]
@@ -205,9 +187,9 @@ class NextLayerDecisionResponse(StrictModel):
 
 
 class GeneratedNodeContext(StrictModel):
-    """单个节点生成完成后的内存上下文，汇总节点说明、正文文档和来源。"""
+    """单个节点生成完成后的内存上下文，汇总节点 card、正文文档和来源。"""
     node: WikiNode
-    node_md: str
+    card: DocumentCard
     documents: list[NodeDocument]
     source_refs: list[SourceRef]
 

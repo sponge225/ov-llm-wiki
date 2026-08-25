@@ -21,7 +21,6 @@ async def test_pipeline_generates_layer_content_before_next_layer_decision():
             _card_content_response(2),
             _card_content_response(3),
             _node_discovery_response(),
-            {"node_md": "# Question Answering\n\n## Scope\n\nQA scope."},
             {
                 "documents": [
                     {
@@ -30,6 +29,7 @@ async def test_pipeline_generates_layer_content_before_next_layer_decision():
                     }
                 ],
             },
+            _node_card_content_response(),
             {"continue_upward": False, "reasons": ["no stable parent layer"]},
         ]
     )
@@ -53,12 +53,15 @@ async def test_pipeline_generates_layer_content_before_next_layer_decision():
         "doc_card",
         "doc_card",
         "doc_card",
-        "bottom_node_discovery",
-        "node_md",
+        "node_discovery",
         "node_documents",
+        "node_card",
         "next_layer_decision",
     ]
     assert "viking://wiki/nodes/question_answering/documents/0001.md" in client.writes
+    assert "viking://wiki/nodes/question_answering/card.md" in client.writes
+    assert "viking://wiki/nodes/question_answering/card.json" in client.writes
+    assert "viking://wiki/nodes/question_answering/node.md" not in client.writes
     assert "viking://wiki/nodes/question_answering/evidence.jsonl" not in client.writes
     assert artifacts.node_contexts[0].documents[0].document_id == "0001"
 
@@ -106,18 +109,17 @@ async def test_pipeline_does_not_precreate_unassigned_active_node_dirs():
                     {
                         "title": "Question Answering",
                         "scope": "QA methods and evaluation.",
-                        "supporting_doc_ids": ["OARW_1", "OARW_2", "OARW_3"],
+                        "supporting_source_ids": ["OARW_1", "OARW_2", "OARW_3"],
                         "merged_candidate_topics": ["question answering"],
                     },
                     {
                         "title": "Unassigned Topic",
                         "scope": "No assigned sources.",
-                        "supporting_doc_ids": ["OARW_1"],
+                        "supporting_source_ids": ["OARW_1"],
                         "merged_candidate_topics": ["unknown topic"],
                     },
                 ]
             },
-            {"node_md": "# Question Answering\n\n## Scope\n\nQA scope."},
             {
                 "documents": [
                     {
@@ -126,6 +128,7 @@ async def test_pipeline_does_not_precreate_unassigned_active_node_dirs():
                     }
                 ],
             },
+            _node_card_content_response(),
             {"continue_upward": False, "reasons": ["no stable parent layer"]},
         ]
     )
@@ -216,8 +219,17 @@ def _node_discovery_response() -> dict:
             {
                 "title": "Question Answering",
                 "scope": "QA methods and evaluation.",
-                "supporting_doc_ids": ["OARW_1", "OARW_2", "OARW_3"],
+                "supporting_source_ids": ["OARW_1", "OARW_2", "OARW_3"],
                 "merged_candidate_topics": ["question answering"],
             }
         ]
+    }
+
+
+def _node_card_content_response() -> dict:
+    return {
+        "summary": "Question answering node synthesis.",
+        "main_points": ["QA synthesis"],
+        "important_terms": ["question answering"],
+        "candidate_topics": ["question answering systems"],
     }

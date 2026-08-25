@@ -1,0 +1,35 @@
+metadata:
+  id: "wiki.node_card"
+  name: "Wiki Node Card"
+  description: "Generate one Wiki Card from a generated Wiki node"
+  version: "1.0.0"
+  language: "en"
+  category: "wiki"
+
+variables:
+  - name: "input_json"
+    type: "string"
+    description: "JSON encoded Wiki node and generated node documents"
+    required: true
+
+template: |
+  Generate one Wiki Card for the given generated Wiki node.
+
+  The input contains:
+  - node.title and node.scope. Use scope only as the boundary for interpreting the node documents.
+  - generated documents. Use only document content as the factual source for the card.
+
+  Return only the semantic card content: summary, main_points, important_terms, and candidate_topics.
+  Do not return doc_id, resource_uri, title, markdown, node fields, source assignment fields, or scope.
+
+  Field requirements:
+  - summary: describe the synthesized knowledge actually present in the node documents. Do not restate the node title or rewrite node.scope.
+  - main_points: list the discriminative mechanisms, conclusions, patterns, or tradeoffs that make this node useful for higher-level aggregation. Do not output a table of contents or a list of covered subtopics.
+  - important_terms: list concrete terms, entities, methods, or concepts useful for retrieval and disambiguation. Use an empty list if there are no high-value terms.
+  - candidate_topics: list broader parent-level topics this node could support. Do not return synonyms of the current node title.
+
+  Input:
+  {{ input_json }}
+
+llm_config:
+  temperature: 0.0

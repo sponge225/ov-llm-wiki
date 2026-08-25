@@ -67,39 +67,40 @@
 
 `SourceSection` 表示节点正文生成时使用的一段来源内容。它包含 `section_uri` 和 `content`：前者说明这段内容来自哪里，后者是真正给节点正文生成使用的文本。
 
-`ResourceDocument` 表示已经加载好内容的文档。它同时服务两个后续阶段：`content_or_structure` 是给 `cards.py` 生成 Document Card 用的文本输入；`source_sections` 是给底层节点正文生成用的结构化来源片段。
+`ResourceDocument` 表示已经加载好内容的来源文档。它同时服务两个后续阶段：`content_or_structure` 是给 `cards.py` 生成 Document Card 用的文本输入；`source_sections` 是给节点正文生成用的结构化来源片段。底层节点的 `ResourceDocument` 来自原始资源；更高层节点的 `ResourceDocument` 由下层节点正文临时转换而来。
 
 `DocumentCardContent` 表示 LLM 需要返回的 card 内容。它只包含语义信息，例如文档总结、主要观点、重要术语、候选 Wiki 主题；不包含 `doc_id`、`resource_uri`、`title` 这类系统已经知道的字段。
 
-`DocumentCard` 是最终的完整文档卡片。它在 `DocumentCardContent` 的基础上补上 `doc_id`、`resource_uri`、`title` 和 `markdown`。后续节点发现和来源分配都会基于这些 Document Cards 继续处理。
+`DocumentCard` 是最终的完整来源卡片。它在 `DocumentCardContent` 的基础上补上 `doc_id`、`resource_uri`、`title` 和 `markdown`。它既可以表示原始文档，也可以表示一个已经生成好的 Wiki node。后续节点发现和来源分配都基于同一类 card 继续处理。
 
 #### 1.4 WikiNode 和节点发现相关对象
 
 对应代码：`openviking/wiki/schemas.py#L100-L138`
 
-`WikiNode` 表示最终 Wiki 树上的一个主题节点。它包含节点 ID、标题、层级、覆盖范围，以及父子节点关系。`node_id` 会进入节点目录路径，所以必须是稳定且路径安全的字符串。
+`WikiNode` 表示最终 Wiki 图上的一个主题节点。它包含节点 ID、标题、层级、覆盖范围，以及父子节点关系。`node_id` 会进入节点目录路径，所以必须是稳定且路径安全的字符串。
+
+`scope` 是节点的权威边界，长期保存在 `nodes.json`。它不迁移到 card，也不被 card 的 `summary` 替代；节点正文生成时继续使用 `scope` 作为 include/exclude 约束。
+
+父子关系不是严格树，而是 DAG。`parent_node_ids` 是列表，允许同一个节点属于多个更高层节点；`child_node_ids` 记录当前节点覆盖的下层节点。
 
 `status` 用来区分节点是否会继续生成内容。节点发现阶段生成的节点默认是 `active`；后续如果发现某个节点绑定到的来源数量不足，代码会把它标记为 `rejected`。被拒绝的节点会保留在 `nodes.json` 里，方便排查模型发现了哪些候选主题，但不会继续生成节点正文。
 
 `WikiNodeDiscoveryItem` 是 LLM 在节点发现阶段返回的基础节点信息。它只让 LLM 说明“这个节点叫什么”（`title`）以及“这个节点覆盖哪些知识范围”（`scope`）。
 
-`WikiBottomNodeDiscoveryItem` 用于底层节点发现。底层节点直接来自 Document Cards，所以它会记录“哪些原始文档支撑这个节点”（`supporting_doc_ids`）。
+`WikiSourceNodeDiscoveryItem` 用于统一的节点发现。无论当前层的来源是原始文档 card，还是下层 node card，LLM 都返回 `supporting_source_ids` 来说明“哪些来源 card 支撑这个节点”。
 
-`WikiParentNodeDiscoveryItem` 用于父层节点发现。父层节点不是直接从原始文档生成，而是从已经生成的子节点中聚合出来，所以它会记录“哪些子节点支撑这个父节点”（`supporting_child_titles`）。
-其中 `merged_child_topics` 记录这些子节点合并成父节点时涉及的主题方向，主要作为解释性信息保留下来。
-
-`WikiBottomNodeDiscoveryResponse` 和 `WikiParentNodeDiscoveryResponse` 分别是底层节点发现和父层节点发现的整体返回结构。除了发现出的节点外，它们还会记录没有被分配进去的文档或子节点，便于后续排查。
+`WikiSourceNodeDiscoveryResponse` 是节点发现的整体返回结构。除了发现出的节点外，它还会记录没有被分配进去的来源 ID，便于后续排查。
 
 #### 1.5 SourceRef 和来源分配相关对象
 
 对应代码：`openviking/wiki/schemas.py#L141-L170`
 
-`SourceRef` 表示生成某个 Wiki 节点正文时可以参考的一个来源。底层节点的来源通常是原始文档，父层节点的来源通常是已经生成的子 Wiki 节点。
+`SourceRef` 表示生成某个 Wiki 节点正文时可以参考的一个来源。来源可能是原始文档，也可能是已经生成好的下层 Wiki 节点。两者都先以 `DocumentCard` 参与节点发现，再转换成 `SourceRef`。
 
 `support_scope` 说明这个来源支撑当前节点的哪部分范围；`matched_topics` 记录匹配到的主题信息。它们不是新的推理结果，主要是把前面已有的节点范围和候选主题带到来源记录里，方便后续生成正文时使用。
 
-`SourceAssignmentResult` 是代码整理后的“节点到来源”总表。它告诉后续流程每个节点有哪些可用来源；父层节点还会额外记录它由哪些子节点组成。
-`unassigned_source_ids` 记录没有被分配到任何节点的来源 ID。底层时它表示未分配的原始文档 ID，父层时它表示未聚合的子节点 ID。当前它主要写入 `source_assignments.json` 用于排查覆盖缺口；未来也可以用于补节点、重新分配或增量更新。
+`SourceAssignmentResult` 是代码整理后的“节点到来源”总表。它告诉后续流程每个节点有哪些可用来源。父层节点的 `child_node_ids` 不再由一个单独字段保存，而是从 `ref_type == "wiki_node"` 的 `SourceRef` 派生。
+`unassigned_source_ids` 记录没有被分配到任何节点的来源 ID。底层时它表示未分配的原始文档 ID，父层时它表示未聚合的下层 node ID。当前它主要写入 `source_assignments.json` 用于排查覆盖缺口；未来也可以用于补节点、重新分配或增量更新。
 
 `SourceAssignmentItem` 和 `SourceAssignmentResponse` 用来表达“某个节点由哪些来源支撑”。节点发现阶段先得到这类绑定关系，后续再把它转换成详细的 `SourceRef`。
 
@@ -107,13 +108,11 @@
 
 对应代码：`openviking/wiki/schemas.py#L173-L213`
 
-`NodeMarkdownResponse` 表示 LLM 生成的 `node.md`。`node.md` 是节点说明页，用来说明这个节点的标题和知识边界，不是节点的正式综合正文。
-
 `NodeDocumentsResponse` 表示 LLM 生成的节点正文列表。真正的综合知识内容会写入 `nodes/<node_id>/documents/*.md`。
 
 `NodeDocumentContent` 是 LLM 返回的单篇正文内容，只包含标题和正文；`NodeDocument` 是代码补上 `document_id` 后的完整对象，用来决定最终写成 `0001.md`、`0002.md` 这类文件。
 
-`GeneratedNodeContext` 表示一个节点生成完成后的内存结果，包含节点对象、`node.md`、正文文档和来源。后续生成父层节点时，会把子节点的这些结果作为输入。
+`GeneratedNodeContext` 表示一个节点生成完成后的内存结果，包含节点对象、node card、正文文档和来源。后续生成更高层节点时，会把下层 node card 作为统一来源输入。
 
 ## 2. `openviking/wiki/config.py`
 
@@ -133,7 +132,7 @@
 
 ### 文件定位
 
-`uri.py` 统一管理 Wiki 产物的写入路径。后续代码要写 card、节点说明、节点正文、来源文件或运行日志时，都通过这里的函数拼出 `viking://wiki/...` 路径，避免到处手写路径字符串。
+`uri.py` 统一管理 Wiki 产物的写入路径。后续代码要写 card、节点正文、来源文件或运行日志时，都通过这里的函数拼出 `viking://wiki/...` 路径，避免到处手写路径字符串。
 
 ### 阅读记录
 
@@ -141,7 +140,7 @@
 
 `sanitize_node_id` 会把节点标题转换成适合放进路径里的节点 ID。例如 `Question Answering` 会变成 `question_answering`。这样生成的节点目录可以稳定写到 `viking://wiki/nodes/<node_id>/`。
 
-其他函数负责拼接固定产物路径，例如 cards 目录、节点目录、`node.md`、`documents/0001.md`、`sources/` 和 `run/`。简单说，这个文件定义了 Wiki 产物在 `viking://wiki/` 下的目录布局。
+其他函数负责拼接固定产物路径，例如原始文档 cards 目录、节点目录、`nodes/<node_id>/card.md`、`nodes/<node_id>/card.json`、`documents/0001.md`、`sources/` 和 `run/`。简单说，这个文件定义了 Wiki 产物在 `viking://wiki/` 下的目录布局。
 
 ## 4. `openviking/wiki/writer.py`
 
@@ -203,15 +202,11 @@
 
 `build_document_card_prompt` 只给模型看文档内容和少量 card 生成相关 metadata，不传 `doc_id`、`resource_uri`、`title` 这些标识字段。
 
-`build_bottom_node_discovery_prompt` 只给模型看每篇文档的 `doc_id`、候选主题和摘要，用来聚合底层节点，不传全文。
+`build_node_discovery_prompt` 只给模型看每个来源 card 的 `source_id`、`title`、`summary` 和 `candidate_topics`，用来聚合当前层节点，不传全文。底层来源 card 来自原始文档；更高层来源 card 来自下层 node。
 
-`build_parent_node_discovery_prompt` 只给模型看子节点的标题和范围说明，用来发现更上层的父节点，不传子节点正文。
+`build_node_documents_prompt` 传节点边界和来源片段，用来生成节点正文。来源片段可能来自原始文档，也可能来自下层 node documents；prompt 统一要求按知识综合，不按来源逐段总结。
 
-`build_node_md_prompt` 只传节点标题和范围说明，用来生成节点目录说明。
-
-`build_node_documents_prompt` 传节点边界和原文来源内容，用来生成底层节点正文。
-
-`build_parent_node_documents_prompt` 传父节点边界和子节点正文，用来生成父层节点正文。
+`build_node_card_prompt` 在节点正文生成后调用。它传 `WikiNode.title/scope` 和当前节点的 `documents/*.md`，生成 node card 的 `summary/main_points/important_terms/candidate_topics`。这里 `scope` 只作为理解正文的边界，不作为 card 字段输出。
 
 `build_next_layer_decision_prompt` 传当前层已经生成好的节点信息，用来判断是否还需要继续向上聚合。
 
@@ -307,7 +302,7 @@ pipeline 会把这份 Markdown 写成 `.card.md` 文件；同时也会写一份 
 
 ### 文件定位
 
-`nodes.py` 负责发现 Wiki 节点。它接收 Document Card 或上一层已经生成好的节点，让 LLM 归纳出当前层的节点，并整理出“每个节点由哪些下层来源支撑”。
+`nodes.py` 负责发现 Wiki 节点。它接收一组来源 card，让 LLM 归纳出当前层的节点，并整理出“每个节点由哪些下层来源支撑”。
 
 ### 阅读记录
 
@@ -315,19 +310,17 @@ pipeline 会把这份 Markdown 写成 `.card.md` 文件；同时也会写一份 
 
 `NodeDiscoveryRunner` 是节点发现的主类。它持有 `WikiLLMRunner` 和 `WikiConfig`，分别用于调用模型和读取过滤阈值。
 
-`discover_bottom_layer` 用于发现底层节点。它接收一组 `DocumentCard`，构造底层节点发现 prompt，让模型根据 card 的摘要和候选主题归纳 Wiki 节点。模型返回节点标题、范围说明，以及每个节点关联的 `doc_id`。
+`discover_layer` 是统一入口。它接收一组 `DocumentCard`，构造节点发现 prompt，让模型根据 card 的摘要和候选主题归纳 Wiki 节点。模型返回节点标题、范围说明，以及每个节点关联的 `supporting_source_ids`。
 
-`discover_parent_layer` 用于发现父层节点。它接收上一层的 `GeneratedNodeContext`，让模型根据子节点标题和范围继续聚合父节点。模型返回的是子节点标题，代码会把这些标题转换成系统内部使用的 `node_id`。
-
-两个入口最终都会返回类似的结果：一组 `WikiNode`，以及一份 `SourceAssignmentResponse`。底层节点的来源是文档，父层节点的来源是子节点。
+底层和更高层的区别只体现在输入 card 的来源：底层输入是原始文档 card，更高层输入是上一层生成出来的 node card。返回结果都是一组 `WikiNode` 和一份 `SourceAssignmentResponse`。
 
 #### 10.2 结果整理和校验
 
-`_parse_bottom_layer_result` 和 `_parse_parent_layer_result` 负责把模型返回的 JSON 转成项目内部对象。它们先用 Pydantic 校验返回结构，再调用 `_build_nodes` 生成正式的 `WikiNode`。
+`_parse_layer_result` 负责把模型返回的 JSON 转成项目内部对象。它先用 Pydantic 校验返回结构，再调用 `_build_nodes` 生成正式的 `WikiNode`。
 
-`_build_nodes` 会根据节点标题生成 `node_id`，并补上当前层级 `depth`。如果同一批节点标题生成了重复 ID，会自动加后缀，避免冲突。
+`_build_nodes` 会根据节点标题生成 `node_id`，并补上当前层级 `depth`。如果同一批节点标题生成了重复 ID，或者和已有来源 card 的 ID 冲突，会自动加后缀，避免路径冲突。
 
-父层节点需要额外处理标题到 ID 的转换。`_child_title_to_node_id` 会建立“子节点标题 -> 子节点 ID”的映射；`_map_child_titles` 会把模型返回的标题列表转换成 ID 列表。如果模型引用了不存在的子节点标题，代码会直接报错。
+`_ensure_known_sources` 会检查模型返回的来源 ID 是否全部来自输入 card。更高层不再通过标题匹配子节点，而是直接使用下层 node card 的 `doc_id` 作为来源 ID。
 
 `_complete_with_validation_retry` 是通用的 LLM 调用重试逻辑。它负责调用模型、校验返回结果，失败时最多重试 3 次。
 
@@ -337,7 +330,7 @@ pipeline 会把这份 Markdown 写成 `.card.md` 文件；同时也会写一份 
 
 `assignments.py` 负责把节点发现阶段得到的来源 ID，转换成后续生成正文可直接使用的 `SourceRef`。
 
-它不调用模型，也不重新判断节点是否合理。它只做一件事：根据已知的 card 或子节点上下文，补齐来源标题、URI、支撑范围等信息。
+它不调用模型，也不重新判断节点是否合理。它只做一件事：根据已知的 card 补齐来源标题、URI、支撑范围等信息。
 
 ### 阅读记录
 
@@ -345,21 +338,21 @@ pipeline 会把这份 Markdown 写成 `.card.md` 文件；同时也会写一份 
 
 `SourceRefBuilder` 是这个文件的主类。它持有 `WikiConfig`，用于拼出 card、node 等产物路径。
 
-`build_document_refs_by_node` 用于底层节点。输入是 `nodes.py` 生成的 `SourceAssignmentItem` 和所有 `DocumentCard`，输出是按节点分组的文档 `SourceRef`。这里会把 `doc_id` 转换成完整来源信息，包括原始资源 URI、card markdown 地址、文档标题和候选主题。
+`build_refs_by_node` 是统一入口。输入是 `nodes.py` 生成的 `SourceAssignmentItem` 和当前层所有来源 `DocumentCard`，输出是按节点分组的 `SourceRef`。
 
-`build_child_refs_by_node` 用于父层节点。输入是“父节点 -> 子节点 ID 列表”和上一层的 `GeneratedNodeContext`，输出是按父节点分组的子节点 `SourceRef`。这里的来源类型是 `wiki_node`，表示父节点引用的是已经生成好的子节点，而不是原始文档。
+如果 card 的 `resource_uri` 指向 `viking://wiki/...`，生成的 `SourceRef.ref_type` 是 `wiki_node`，`card_uri` 指向 `nodes/<node_id>/card.md`；否则 `ref_type` 是 `document`，`card_uri` 指向全局 `cards/<doc_id>.card.md`。
 
 #### 11.2 来源校验
 
-两个转换方法都会先检查来源 ID 是否真实存在。如果模型返回了不存在的 `doc_id` 或子节点 ID，代码会直接报错，避免后续生成正文时引用不存在的来源。
+转换方法会先检查来源 ID 是否真实存在。如果模型返回了不存在的来源 ID，代码会直接报错，避免后续生成正文时引用不存在的来源。
 
-`build_document_refs_by_node` 还会对同一个节点下的文档来源去重，并保留原来的顺序。
+同一个节点下的来源会去重，并保留原来的顺序。
 
 ## 12. `openviking/wiki/documents.py`
 
 ### 文件定位
 
-`documents.py` 负责生成节点内容，包括节点说明 `node.md` 和节点正文 `documents/*.md`。
+`documents.py` 负责生成节点正文 `documents/*.md`。
 
 
 ### 阅读记录
@@ -368,17 +361,11 @@ pipeline 会把这份 Markdown 写成 `.card.md` 文件；同时也会写一份 
 
 `NodeContentGenerator` 是这个文件的主类。它持有 `WikiLLMRunner`，用于调用模型。
 
-`generate_node_md` 生成单个节点的 `node.md`。它只接收 `WikiNode`，让模型根据节点标题和范围说明写出节点介绍。
-
-`generate_node_documents` 生成底层节点正文。它接收当前节点和原始文档来源片段，适用于 `depth == 1` 的节点。这些来源片段来自 `ResourceDocument.source_sections`。
-
-`generate_parent_node_documents` 生成父层节点正文。它接收当前节点和子节点内容，适用于 `depth > 1` 的节点。也就是说，底层节点基于原始文档写正文，父层节点基于子节点已经生成的内容继续归纳。
+`generate_node_documents` 是统一正文生成入口。它接收当前节点和来源片段，适用于所有 depth。底层节点的来源片段来自原始 `ResourceDocument.source_sections`；更高层节点的来源片段来自下层节点正文转换出的 `ResourceDocument.source_sections`。
 
 #### 12.2 结果校验和编号
 
-`_parse_node_md_result` 会把模型返回结果解析成 `NodeMarkdownResponse`，取出并清理 `node_md`，同时确保内容不是空字符串。
-
-`_parse_node_documents_result` 和 `_parse_parent_node_documents_result` 处理模型返回的节点正文。模型只返回每篇正文的标题和内容，代码会交给 `_build_node_documents` 补上 `document_id`，这样后续才能写成 `documents/0001.md`、`documents/0002.md`。如果模型没有返回任何正文，会报错触发重试。
+`_parse_node_documents_result` 处理模型返回的节点正文。模型只返回每篇正文的标题和内容，代码会交给 `_build_node_documents` 补上 `document_id`，这样后续才能写成 `documents/0001.md`、`documents/0002.md`。如果模型没有返回任何正文，会报错触发重试。
 
 `_build_node_documents` 会给每篇正文补上稳定的 `document_id`，格式是 `0001`、`0002` 这种编号。后续 pipeline 会用这个编号写出 `documents/0001.md` 等文件。
 
@@ -417,7 +404,7 @@ pipeline 会把这份 Markdown 写成 `.card.md` 文件；同时也会写一份 
 - `DocumentCardGenerator`：把每篇文档生成 Document Card。
 - `NodeDiscoveryRunner`：根据 card 或上一层节点发现当前层 Wiki 节点。
 - `SourceRefBuilder`：把节点绑定的来源 ID 转成完整 `SourceRef`。
-- `NodeContentGenerator`：生成 `node.md` 和节点正文。
+- `NodeContentGenerator`：生成节点正文。
 - `LayerDecisionRunner`：判断当前层生成完后是否继续向上聚合。
 
 `run_from_inputs` 是当前正式入口。它接收 `WikiResourceInput`，先用 `WikiContentLoader` 加载成 `ResourceDocument`，再生成 Document Card，最后进入按层生成流程。
@@ -430,7 +417,7 @@ pipeline 会把这份 Markdown 写成 `.card.md` 文件；同时也会写一份 
 
 `_run_from_cards` 是主流程。它先写出所有 card 到文件，然后从第 1 层开始循环生成节点，最多不超过 `max_depth`。
 
-第 1 层是底层节点，输入是 Document Cards；父层节点的输入是上一层已经生成好的 `GeneratedNodeContext`。
+第 1 层是底层节点，输入是原始文档 cards；更高层节点的输入是上一层已经生成好的 node cards。
 
 每一层都会按同样的顺序处理：
 
@@ -440,6 +427,7 @@ pipeline 会把这份 Markdown 写成 `.card.md` 文件；同时也会写一份 
 -> 过滤来源不足的节点
 -> 写 nodes.json 和 source_assignments.json
 -> 生成 active 节点内容
+-> 生成 active 节点 card
 -> 判断是否继续向上
 ```
 
@@ -453,26 +441,26 @@ pipeline 会把这份 Markdown 写成 `.card.md` 文件；同时也会写一份 
 
 ```text
 sources/*.ref.json
-node.md
 documents/*.md
+card.md / card.json
 GeneratedNodeContext
 ```
 
-底层节点正文使用原始文档来源片段，来源片段来自 `ResourceDocument.source_sections`。父层节点正文使用已生成好的子节点正文。如果父层节点没有明确绑定子节点，代码会直接报错，避免把所有子节点都错误地当成它的来源。
+节点正文统一使用 `ResourceDocument.source_sections`。底层节点的 `ResourceDocument` 来自原始文档；更高层节点的 `ResourceDocument` 由下层节点正文转换而来。正文生成完成后，再基于 `WikiNode.title/scope` 和 `documents/*.md` 生成 node card，写入 `nodes/<node_id>/card.md` 和 `card.json`。
 
 #### 14.4 主流程里的数据整理
 
 这一组函数主要负责把前面阶段的结果整理成下一步要用的输入。
 
-底层节点生成正文前，会调用 `_source_documents_for_resource_refs`。它根据节点绑定的 `SourceRef` 找到对应的 `ResourceDocument`，再把 `ResourceDocument.source_sections` 包装成 `source_documents`。这样节点正文 prompt 可以直接拿到结构化来源片段。
+节点生成正文前，会调用 `_source_documents_for_refs`。它根据节点绑定的 `SourceRef` 找到对应的 `ResourceDocument`，再把 `ResourceDocument.source_sections` 包装成 `source_documents`。这样节点正文 prompt 可以直接拿到结构化来源片段。
 
-父层节点生成正文前，会先用 `_assigned_child_contexts` 找出这个父节点实际绑定的子节点上下文；如果父节点没有明确绑定子节点，会直接报错。然后 `_child_node_document_inputs` 会把这些子节点上下文整理成父层正文 prompt 需要的输入。
+每个 active 节点生成完成后，会通过 `_resource_document_for_node` 把它的正文转换成下一层可消费的 `ResourceDocument`，并把 node card 放入下一层的来源 card 列表。
 
-节点发现之后，会调用 `_reject_nodes_with_insufficient_refs` 做来源数量过滤。底层节点检查文档来源数，父层节点检查子节点数；来源不足的节点会被标记为 `rejected`。
+节点发现之后，会调用 `_reject_nodes_with_insufficient_refs` 做来源数量过滤。底层阈值来自 `min_refs_per_node`，更高层阈值来自 `min_child_nodes_per_parent`；来源不足的节点会被标记为 `rejected`。
 
-父层节点生成后，`_assign_parent_node_ids` 会把父节点 ID 写回对应子节点，建立子节点到父节点的关系。
+更高层节点生成后，`_assign_parent_node_links` 会把父节点 ID 追加写回对应子节点的 `parent_node_ids`。同一个下层节点可以被多个上层节点引用，所以这里是追加和去重，不是覆盖单个父节点。
 
-文件写入相关的辅助函数比较直接：`_write_cards` 写 card，`_write_source_refs` 写节点来源，`_write_run_records` 写本次运行的配置、prompt 日志和模型原始输出。
+文件写入相关的辅助函数比较直接：`_write_cards` 写原始文档 card，`_write_node_card` 写 node card，`_write_source_refs` 写节点来源，`_write_run_records` 写本次运行的配置、prompt 日志和模型原始输出。
 
 ## 15. `openviking/wiki/service.py`
 
@@ -607,8 +595,9 @@ Wiki 生成后的主要文件和关键类关系如下：
 | `cards/<doc_id>.card.md` | `DocumentCard.markdown` | 同一张 card 的 Markdown 展示版本，方便人工查看。 |
 | `nodes.json` | `list[WikiNode]` | 全部 Wiki 节点索引，包括 active 和 rejected 节点。 |
 | `source_assignments.json` | `SourceAssignmentResult` | 每个节点绑定到哪些来源，以及有哪些来源未分配。 |
-| `nodes/<node_id>/sources/*.ref.json` | `SourceRef` | 单个节点的来源记录。底层节点来源是原始文档，父层节点来源是子节点。 |
-| `nodes/<node_id>/node.md` | `NodeMarkdownResponse.node_md` | 节点说明页，描述节点主题和范围。 |
+| `nodes/<node_id>/sources/*.ref.json` | `SourceRef` | 单个节点的来源记录。来源可能是原始文档，也可能是下层 node。 |
+| `nodes/<node_id>/card.json` | `DocumentCard` | 节点的结构化 card，供更高层节点发现使用。 |
+| `nodes/<node_id>/card.md` | `DocumentCard.markdown` | 节点 card 的 Markdown 展示版本，替代旧 `node.md`。 |
 | `nodes/<node_id>/documents/0001.md` | `NodeDocument.content` | 节点正文，是模型基于来源综合生成的知识内容。 |
 | `run/config.json` | `WikiConfig` | 本次运行使用的配置，包括模型配置和生成限制。 |
 | `run/prompts.jsonl` | `WikiLLMRunner` 日志 | 每次 LLM 调用的 prompt 记录。 |
@@ -641,17 +630,18 @@ biomedical_natural_language_processing_applications
 这个节点目录下会有：
 
 ```text
-nodes/biomedical_natural_language_processing_applications/node.md
+nodes/biomedical_natural_language_processing_applications/card.md
+nodes/biomedical_natural_language_processing_applications/card.json
 nodes/biomedical_natural_language_processing_applications/documents/0001.md
 nodes/biomedical_natural_language_processing_applications/sources/*.ref.json
 ```
 
 其中 `sources/*.ref.json` 是 `SourceRef`。如果 `ref_type` 是 `document`，表示这个来源来自原始文档；如果 `ref_type` 是 `wiki_node`，表示这个来源来自上一层已经生成好的子节点。
 
-父层节点也在同一个 `nodes.json` 里。本次 benchmark 生成了一个 `depth=2` 的父层节点：
+更高层节点也在同一个 `nodes.json` 里。本次 benchmark 生成了 `depth=2` 的上层节点，例如：
 
 ```text
-specialized_natural_language_processing_technology_and_applications
+natural_language_processing_model_design_optimization_and_evaluation
 ```
 
-它的 `child_node_ids` 指向三个底层 active 节点。反过来，这三个底层节点的 `parent_node_id` 也会写成这个父节点 ID。
+它的 `child_node_ids` 指向若干底层 active 节点。反过来，底层节点的 `parent_node_ids` 会追加对应父节点 ID；如果一个底层节点同时支撑多个上层节点，`parent_node_ids` 会保留多个父节点。

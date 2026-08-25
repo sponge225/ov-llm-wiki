@@ -11,19 +11,14 @@ from pydantic import ValidationError
 
 from .config import WikiConfig
 from .llm import WikiLLMRunner
-from .prompts import (
-    build_bottom_node_discovery_prompt,
-    build_parent_node_discovery_prompt,
-)
+from .prompts import build_node_discovery_prompt
 from .schemas import (
     DocumentCard,
-    GeneratedNodeContext,
     SourceAssignmentItem,
     SourceAssignmentResponse,
-    WikiBottomNodeDiscoveryResponse,
     WikiNode,
     WikiNodeDiscoveryItem,
-    WikiParentNodeDiscoveryResponse,
+    WikiSourceNodeDiscoveryResponse,
 )
 from .uri import sanitize_node_id
 
@@ -33,13 +28,7 @@ T = TypeVar("T")
 
 
 @dataclass(frozen=True)
-class BottomLayerDiscoveryResult:
-    nodes: list[WikiNode]
-    source_assignments: SourceAssignmentResponse
-
-
-@dataclass(frozen=True)
-class ParentLayerDiscoveryResult:
+class NodeDiscoveryResult:
     nodes: list[WikiNode]
     source_assignments: SourceAssignmentResponse
 
@@ -49,98 +38,55 @@ class NodeDiscoveryRunner:
         self.llm = llm
         self.config = config
 
-    async def discover_bottom_layer(
+    async def discover_layer(
         self,
         cards: list[DocumentCard],
-        depth: int = 1,
-    ) -> BottomLayerDiscoveryResult:
-        prompt = build_bottom_node_discovery_prompt(
+        *,
+        depth: int,
+        min_sources_per_node: int,
+        reserved_node_ids: set[str] | None = None,
+    ) -> NodeDiscoveryResult:
+        source_ids = {card.doc_id for card in cards}
+        prompt = build_node_discovery_prompt(
             cards,
-            min_refs_per_node=self.config.limits.min_refs_per_node,
+            min_sources_per_node=min_sources_per_node,
         )
         return await _complete_with_validation_retry(
             self.llm,
-            step="bottom_node_discovery",
+            step="node_discovery",
             prompt=prompt,
-            schema=WikiBottomNodeDiscoveryResponse.model_json_schema(),
-            validate=lambda result: self._parse_bottom_layer_result(
+            schema=WikiSourceNodeDiscoveryResponse.model_json_schema(),
+            validate=lambda result: self._parse_layer_result(
                 result,
                 depth,
+                source_ids,
+                reserved_node_ids or set(),
             ),
         )
 
-    def _parse_bottom_layer_result(
+    def _parse_layer_result(
         self,
         result: dict,
         depth: int,
-    ) -> BottomLayerDiscoveryResult:
-        response = WikiBottomNodeDiscoveryResponse.model_validate(result)
-        nodes = self._build_nodes(response.nodes, depth)
+        source_ids: set[str],
+        reserved_node_ids: set[str],
+    ) -> NodeDiscoveryResult:
+        response = WikiSourceNodeDiscoveryResponse.model_validate(result)
+        _ensure_known_sources(response, source_ids)
+        nodes = self._build_nodes(response.nodes, depth, reserved_node_ids=reserved_node_ids)
         assignments = [
             SourceAssignmentItem(
                 node_id=node.node_id,
-                source_ids=item.supporting_doc_ids,
+                source_ids=list(dict.fromkeys(item.supporting_source_ids)),
                 support_scope=node.scope,
             )
             for node, item in zip(nodes, response.nodes, strict=False)
         ]
-        return BottomLayerDiscoveryResult(
+        return NodeDiscoveryResult(
             nodes=nodes,
             source_assignments=SourceAssignmentResponse(
                 assignments=assignments,
-                unassigned_source_ids=response.unassigned_doc_ids,
-            ),
-        )
-
-    async def discover_parent_layer(
-        self,
-        child_nodes: list[GeneratedNodeContext],
-        depth: int,
-    ) -> ParentLayerDiscoveryResult:
-        title_to_node_id = _child_title_to_node_id(child_nodes)
-        prompt = build_parent_node_discovery_prompt(
-            child_nodes,
-            min_child_nodes_per_parent=self.config.limits.min_child_nodes_per_parent,
-        )
-        return await _complete_with_validation_retry(
-            self.llm,
-            step="parent_node_discovery",
-            prompt=prompt,
-            schema=WikiParentNodeDiscoveryResponse.model_json_schema(),
-            validate=lambda result: self._parse_parent_layer_result(
-                result,
-                depth,
-                title_to_node_id,
-            ),
-        )
-
-    def _parse_parent_layer_result(
-        self,
-        result: dict,
-        depth: int,
-        title_to_node_id: dict[str, str],
-    ) -> ParentLayerDiscoveryResult:
-        response = WikiParentNodeDiscoveryResponse.model_validate(result)
-        nodes = self._build_nodes(response.nodes, depth)
-        assignments = [
-            SourceAssignmentItem(
-                node_id=node.node_id,
-                source_ids=_map_child_titles(item.supporting_child_titles, title_to_node_id, node.title),
-                support_scope=node.scope,
-            )
-            for node, item in zip(nodes, response.nodes, strict=False)
-        ]
-        _ensure_child_nodes_have_single_parent(assignments)
-        unassigned_source_ids = _map_child_titles(
-            response.unassigned_child_titles,
-            title_to_node_id,
-            "unassigned_child_titles",
-        )
-        return ParentLayerDiscoveryResult(
-            nodes=nodes,
-            source_assignments=SourceAssignmentResponse(
-                assignments=assignments,
-                unassigned_source_ids=unassigned_source_ids,
+                unassigned_source_ids=list(dict.fromkeys(response.unassigned_source_ids)),
             ),
         )
 
@@ -148,8 +94,10 @@ class NodeDiscoveryRunner:
         self,
         discovered_nodes: list[WikiNodeDiscoveryItem],
         depth: int,
+        *,
+        reserved_node_ids: set[str] | None = None,
     ) -> list[WikiNode]:
-        used_ids: set[str] = set()
+        used_ids: set[str] = set(reserved_node_ids or set())
         nodes: list[WikiNode] = []
         for discovered in discovered_nodes:
             base_id = sanitize_node_id(discovered.title)
@@ -170,39 +118,18 @@ class NodeDiscoveryRunner:
         return nodes
 
 
-def _child_title_to_node_id(child_nodes: list[GeneratedNodeContext]) -> dict[str, str]:
-    title_to_node_id: dict[str, str] = {}
-    for context in child_nodes:
-        title = context.node.title
-        if title in title_to_node_id:
-            raise ValueError(f"duplicate child node title for parent discovery: {title}")
-        title_to_node_id[title] = context.node.node_id
-    return title_to_node_id
-
-
-def _map_child_titles(
-    titles: list[str],
-    title_to_node_id: dict[str, str],
-    field_name: str,
-) -> list[str]:
-    unknown_titles = [title for title in titles if title not in title_to_node_id]
-    if unknown_titles:
-        raise RuntimeError(f"{field_name} references unknown child titles: {unknown_titles}")
-    return list(dict.fromkeys(title_to_node_id[title] for title in titles))
-
-
-def _ensure_child_nodes_have_single_parent(assignments: list[SourceAssignmentItem]) -> None:
-    parent_by_child_id: dict[str, str] = {}
-    conflicts: dict[str, list[str]] = {}
-    for assignment in assignments:
-        for child_node_id in assignment.source_ids:
-            existing_parent_id = parent_by_child_id.get(child_node_id)
-            if existing_parent_id and existing_parent_id != assignment.node_id:
-                conflicts.setdefault(child_node_id, [existing_parent_id]).append(assignment.node_id)
-                continue
-            parent_by_child_id[child_node_id] = assignment.node_id
-    if conflicts:
-        raise RuntimeError(f"child nodes assigned to multiple parent nodes: {conflicts}")
+def _ensure_known_sources(response: WikiSourceNodeDiscoveryResponse, source_ids: set[str]) -> None:
+    unknown_ids = [
+        source_id
+        for node in response.nodes
+        for source_id in node.supporting_source_ids
+        if source_id not in source_ids
+    ]
+    unknown_ids.extend(
+        source_id for source_id in response.unassigned_source_ids if source_id not in source_ids
+    )
+    if unknown_ids:
+        raise RuntimeError(f"node discovery references unknown source ids: {sorted(set(unknown_ids))}")
 
 
 async def _complete_with_validation_retry(

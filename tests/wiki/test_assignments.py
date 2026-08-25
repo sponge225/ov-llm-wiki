@@ -4,23 +4,22 @@ from openviking.wiki.assignments import SourceRefBuilder
 from openviking.wiki.config import WikiConfig
 from openviking.wiki.schemas import (
     DocumentCard,
-    GeneratedNodeContext,
-    NodeDocument,
     SourceAssignmentItem,
-    SourceRef,
-    WikiNode,
 )
 
 
-def test_source_ref_builder_binds_child_node_ids_without_inheriting_source_refs():
+def test_source_ref_builder_binds_wiki_node_cards():
     builder = SourceRefBuilder(WikiConfig())
 
-    refs_by_node = builder.build_child_refs_by_node(
-        {"parent_node": ["child_a", "child_b"]},
+    refs_by_node = builder.build_refs_by_node(
         [
-            _context("child_a", "OARW_1"),
-            _context("child_b", "OARW_2"),
+            SourceAssignmentItem(
+                node_id="parent_node",
+                source_ids=["child_a", "child_b"],
+                support_scope="Children support parent.",
+            )
         ],
+        [_node_card("child_a"), _node_card("child_b")],
     )
 
     refs = refs_by_node["parent_node"]
@@ -30,12 +29,16 @@ def test_source_ref_builder_binds_child_node_ids_without_inheriting_source_refs(
         "viking://wiki/nodes/child_a/",
         "viking://wiki/nodes/child_b/",
     ]
+    assert [ref.card_uri for ref in refs] == [
+        "viking://wiki/nodes/child_a/card.md",
+        "viking://wiki/nodes/child_b/card.md",
+    ]
 
 
 def test_source_ref_builder_binds_document_source_ids():
     builder = SourceRefBuilder(WikiConfig())
 
-    refs_by_node = builder.build_document_refs_by_node(
+    refs_by_node = builder.build_refs_by_node(
         [
             SourceAssignmentItem(
                 node_id="question_answering",
@@ -52,21 +55,11 @@ def test_source_ref_builder_binds_document_source_ids():
     assert refs[0].support_scope == "QA source supports the node."
 
 
-def test_source_ref_builder_rejects_unknown_child_node_ids():
-    builder = SourceRefBuilder(WikiConfig())
-
-    with pytest.raises(RuntimeError, match="unknown child node ids"):
-        builder.build_child_refs_by_node(
-            {"parent_node": ["child_a", "invented_child"]},
-            [_context("child_a", "OARW_1")],
-        )
-
-
-def test_source_ref_builder_rejects_unknown_document_source_ids():
+def test_source_ref_builder_rejects_unknown_source_ids():
     builder = SourceRefBuilder(WikiConfig())
 
     with pytest.raises(RuntimeError, match="unknown doc_id values"):
-        builder.build_document_refs_by_node(
+        builder.build_refs_by_node(
             [
                 SourceAssignmentItem(
                     node_id="question_answering",
@@ -89,23 +82,12 @@ def _card(doc_id: str) -> DocumentCard:
     )
 
 
-def _context(node_id: str, doc_id: str) -> GeneratedNodeContext:
-    source_ref = SourceRef(
-        ref_id=doc_id,
-        doc_id=doc_id,
-        resource_uri=f"viking://resources/{doc_id}/",
-        card_uri=f"viking://wiki/cards/{doc_id}.card.md",
-        title=f"Paper {doc_id}",
-        support_scope="Supports child node.",
-    )
-    return GeneratedNodeContext(
-        node=WikiNode(
-            node_id=node_id,
-            title=node_id.replace("_", " ").title(),
-            depth=1,
-            scope="Supported topic.",
-        ),
-        node_md=f"# {node_id}",
-        documents=[NodeDocument(document_id="0001", content=f"# {node_id}\n\nKnowledge.")],
-        source_refs=[source_ref],
+def _node_card(node_id: str) -> DocumentCard:
+    return DocumentCard(
+        doc_id=node_id,
+        resource_uri=f"viking://wiki/nodes/{node_id}/",
+        title=node_id.replace("_", " ").title(),
+        summary="Node summary.",
+        main_points=["Node point"],
+        candidate_topics=["Parent topic"],
     )

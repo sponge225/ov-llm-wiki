@@ -97,9 +97,8 @@ def _wiki_subtree_node_ids(
         node_id = node.get("node_id")
         if not node_id:
             continue
-        parent_node_id = node.get("parent_node_id")
-        if parent_node_id:
-            children_by_parent.setdefault(str(parent_node_id), []).append(str(node_id))
+        for parent_node_id in _wiki_parent_node_ids(node):
+            children_by_parent.setdefault(parent_node_id, []).append(str(node_id))
         for child_node_id in node.get("child_node_ids") or []:
             children_by_parent.setdefault(str(node_id), []).append(str(child_node_id))
 
@@ -124,7 +123,7 @@ def _wiki_direct_child_node_ids(
         return [
             str(node.get("node_id"))
             for node in nodes
-            if node.get("node_id") and not node.get("parent_node_id")
+            if node.get("node_id") and not _wiki_parent_node_ids(node)
         ]
 
     direct: list[str] = []
@@ -141,13 +140,21 @@ def _wiki_direct_child_node_ids(
 
     for node in nodes:
         node_id = node.get("node_id")
-        if not node_id or str(node.get("parent_node_id") or "") != target_node_id:
+        if not node_id or target_node_id not in _wiki_parent_node_ids(node):
             continue
         node_id = str(node_id)
         if node_id not in seen:
             direct.append(node_id)
             seen.add(node_id)
     return direct
+
+
+def _wiki_parent_node_ids(node: dict[str, Any]) -> list[str]:
+    parent_node_ids = node.get("parent_node_ids")
+    if isinstance(parent_node_ids, list):
+        return [str(parent_node_id) for parent_node_id in parent_node_ids if parent_node_id]
+    parent_node_id = node.get("parent_node_id")
+    return [str(parent_node_id)] if parent_node_id else []
 
 
 def _wiki_node_entry(node_id: str, node: dict[str, Any] | None, output: str) -> dict[str, Any]:

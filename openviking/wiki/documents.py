@@ -1,4 +1,4 @@
-"""Steps 5 and 6: generate node.md and node documents."""
+"""Generate Wiki node documents."""
 
 from __future__ import annotations
 
@@ -9,15 +9,10 @@ from typing import TypeVar
 from pydantic import ValidationError
 
 from .llm import WikiLLMRunner
-from .prompts import (
-    build_node_documents_prompt,
-    build_node_md_prompt,
-    build_parent_node_documents_prompt,
-)
+from .prompts import build_node_documents_prompt
 from .schemas import (
     NodeDocument,
     NodeDocumentsResponse,
-    NodeMarkdownResponse,
     WikiNode,
 )
 
@@ -29,23 +24,6 @@ T = TypeVar("T")
 class NodeContentGenerator:
     def __init__(self, llm: WikiLLMRunner):
         self.llm = llm
-
-    async def generate_node_md(self, node: WikiNode) -> str:
-        return await _complete_with_validation_retry(
-            self.llm,
-            step="node_md",
-            prompt=build_node_md_prompt(node),
-            schema=NodeMarkdownResponse.model_json_schema(),
-            node_id=node.node_id,
-            validate=lambda result: self._parse_node_md_result(node, result),
-        )
-
-    def _parse_node_md_result(self, node: WikiNode, result: dict) -> str:
-        response = NodeMarkdownResponse.model_validate(result)
-        node_md = response.node_md.strip()
-        if not node_md:
-            raise RuntimeError(f"node_md for {node.node_id} is empty")
-        return node_md
 
     async def generate_node_documents(
         self,
@@ -68,39 +46,7 @@ class NodeContentGenerator:
             ),
         )
 
-    async def generate_parent_node_documents(
-        self,
-        node: WikiNode,
-        child_nodes: list[dict],
-    ) -> list[NodeDocument]:
-        prompt = build_parent_node_documents_prompt(
-            node,
-            child_nodes,
-        )
-        return await _complete_with_validation_retry(
-            self.llm,
-            step="parent_node_documents",
-            prompt=prompt,
-            schema=NodeDocumentsResponse.model_json_schema(),
-            node_id=node.node_id,
-            validate=lambda result: self._parse_parent_node_documents_result(
-                node,
-                result,
-            ),
-        )
-
     def _parse_node_documents_result(
-        self,
-        node: WikiNode,
-        result: dict,
-    ) -> list[NodeDocument]:
-        response = NodeDocumentsResponse.model_validate(result)
-        documents = _build_node_documents(response.documents)
-        if not documents:
-            raise RuntimeError(f"node_documents for {node.node_id} is empty")
-        return documents
-
-    def _parse_parent_node_documents_result(
         self,
         node: WikiNode,
         result: dict,
