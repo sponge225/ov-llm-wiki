@@ -9,6 +9,7 @@ from openviking.prompts.manager import PromptManager
 from .schemas import (
     DocumentCard,
     GeneratedNodeContext,
+    NodeDocument,
     ResourceDocument,
     WikiNode,
 )
@@ -29,47 +30,27 @@ def build_document_card_prompt(doc: ResourceDocument) -> str:
     return _render_wiki_prompt("wiki.document_card", payload)
 
 
-def build_bottom_node_discovery_prompt(
+def build_node_discovery_prompt(
     cards: list[DocumentCard],
-    min_refs_per_node: int,
+    min_sources_per_node: int,
 ) -> str:
     inputs = {
         "source_unit_count": len(cards),
-        "min_refs_per_node": min_refs_per_node,
-        "topic_records": [
-            card.model_dump(
-                include={"doc_id", "candidate_topics", "summary"},
-                mode="json",
-            )
-            for card in cards
-        ],
+        "min_sources_per_node": min_sources_per_node,
+        "source_records": [_source_card_payload(card) for card in cards],
     }
-    return _render_wiki_prompt("wiki.bottom_node_discovery", inputs)
+    return _render_wiki_prompt("wiki.node_discovery", inputs)
 
 
-def build_parent_node_discovery_prompt(
-    child_nodes: list[GeneratedNodeContext],
-    min_child_nodes_per_parent: int,
-) -> str:
-    inputs = {
-        "source_unit_count": len(child_nodes),
-        "min_child_nodes_per_parent": min_child_nodes_per_parent,
-        "child_node_records": [
-            context.node.model_dump(
-                include={"title", "scope"},
-                mode="json",
-            )
-            for context in child_nodes
-        ],
-    }
-    return _render_wiki_prompt("wiki.parent_node_discovery", inputs)
-
-
-def build_node_md_prompt(node: WikiNode) -> str:
+def build_node_card_prompt(node: WikiNode, documents: list[NodeDocument]) -> str:
     inputs = {
         "node": node.model_dump(include={"title", "scope"}, mode="json"),
+        "documents": [
+            document.model_dump(include={"title", "content"}, mode="json")
+            for document in documents
+        ],
     }
-    return _render_wiki_prompt("wiki.node_md", inputs)
+    return _render_wiki_prompt("wiki.node_card", inputs)
 
 
 def build_node_documents_prompt(
@@ -81,17 +62,6 @@ def build_node_documents_prompt(
         "source_documents": source_documents,
     }
     return _render_wiki_prompt("wiki.node_documents", inputs)
-
-
-def build_parent_node_documents_prompt(
-    node: WikiNode,
-    child_nodes: list[dict],
-) -> str:
-    inputs = {
-        "node": node.model_dump(include={"title", "scope"}, mode="json"),
-        "child_nodes": child_nodes,
-    }
-    return _render_wiki_prompt("wiki.parent_node_documents", inputs)
 
 
 def build_next_layer_decision_prompt(
@@ -111,9 +81,21 @@ def build_next_layer_decision_prompt(
 def _child_node_payload(context: GeneratedNodeContext) -> dict:
     return {
         "node": context.node.model_dump(mode="json"),
-        "node_md": context.node_md,
+        "card": context.card.model_dump(
+            include={"summary", "main_points", "important_terms", "candidate_topics"},
+            mode="json",
+        ),
         "documents": [document.model_dump(mode="json") for document in context.documents],
         "source_refs": [ref.model_dump(mode="json") for ref in context.source_refs],
+    }
+
+
+def _source_card_payload(card: DocumentCard) -> dict:
+    return {
+        "source_id": card.doc_id,
+        "title": card.title,
+        "summary": card.summary,
+        "candidate_topics": card.candidate_topics,
     }
 
 

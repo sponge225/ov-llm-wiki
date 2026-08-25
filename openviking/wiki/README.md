@@ -8,7 +8,7 @@
 
 当前实现优先保证 Wiki 正文稳定生成：
 
-- 生成 Document Card、Wiki 节点、节点说明页和节点 Markdown 正文。
+- 生成 Document Card、Wiki 节点、节点 card 和节点 Markdown 正文。
 - 保留节点级来源列表，写入 `source_assignments.json` 和 `nodes/<node_id>/sources/*.ref.json`。
 - 正文生成阶段暂不让模型输出 claim 级 `evidence_refs` 或父层 `support_refs`。
 - 不再做“生成句子必须逐字出现在正文中”的运行时校验。
@@ -38,13 +38,13 @@ openviking/wiki/
 ├── prompts.py
 │   └── 渲染 openviking/prompts/templates/wiki/ 下的模板。
 ├── cards.py
-│   └── 为每篇资源文档生成 Document Card。
+│   └── 为资源文档和 Wiki 节点生成 Document Card。
 ├── nodes.py
 │   └── 发现底层节点和父层节点。
 ├── assignments.py
 │   └── 把节点发现结果里的来源 ID 确定性转换成 SourceRef。
 ├── documents.py
-│   └── 生成 node.md 和节点 Markdown 正文，并处理结构化输出重试。
+│   └── 生成节点 Markdown 正文，并处理结构化输出重试。
 ├── layer_decision.py
 │   └── 判断是否继续向上生成父层节点。
 ├── content_loader.py
@@ -67,16 +67,15 @@ openviking/wiki/
 ```text
 资源文档
   -> Document Cards
-  -> 底层节点发现
+  -> 节点发现
   -> SourceRef 构造
-  -> node.md + 节点正文
-  -> 可选父层节点发现
-  -> 父层 SourceRef 构造
-  -> 父层节点正文
+  -> 节点正文
+  -> 节点 card
+  -> 可选上层节点发现
   -> Manifest 和运行日志
 ```
 
-核心边界是 Document Card。节点发现不直接读所有长文档，而是先读压缩后的 cards。节点正文生成时，再拿该节点被选中的来源文档内容或子节点正文内容做综合写作。
+核心边界是 Document Card。节点发现不直接读所有长文档，而是先读压缩后的 cards。节点正文生成时，再拿该节点被选中的来源文档内容或下层节点正文内容做综合写作。`WikiNode.scope` 是节点的权威边界，长期保存在 `nodes.json`，并继续约束正文生成；node card 的 `summary` 不替代 `scope`。
 
 ## 资源输入和文档边界
 
@@ -154,24 +153,25 @@ viking://resources/qasper_30_processed_docs/nested/paper_b
 
 每篇输入分别生成一个 Document Card。
 
-### 底层节点
+### 节点发现与节点 card
 
-底层节点从 Document Card 中发现。模型返回候选节点，以及每个节点由哪些 `doc_id` 支撑。代码随后：
+节点从上一层 source cards 中发现。第一层的 source cards 是原始文档 cards；更高层的 source cards 是下层节点生成后的 node cards。模型返回候选节点，以及每个节点由哪些 `source_id` 支撑。代码随后：
 
 - 规范化 `node_id`；
 - 基于已知 `DocumentCard` 构造 `SourceRef`；
 - 用 `min_refs_per_node` 过滤来源不足的节点；
-- 为保留下来的 active 节点写 `node.md` 和正文文档。
+- 为保留下来的 active 节点写正文文档；
+- 正文生成完成后，再基于 `WikiNode.title/scope` 和正文文档生成 `nodes/<node_id>/card.md/json`。
 
-`assignments.py` 不调用 LLM。它只校验模型返回的来源 ID 是否存在，并用已知 card/child context 构造 SourceRef。
+`assignments.py` 不调用 LLM。它只校验模型返回的来源 ID 是否存在，并用已知 card 构造 SourceRef。
 
-### 父层节点
+### 上层节点
 
-父层节点从已生成的子节点上下文中发现，不再直接读取原始长文档。父层正文的输入是父 node 的 title/scope，以及子节点的 title/scope/document content。
+上层节点从已生成的下层 node cards 中发现，不再直接读取原始长文档。上层正文的输入是当前 node 的 title/scope，以及下层节点正文转换出的 source sections。
 
-父层 prompt 的重点是综合：输出应围绕父层知识点组织，而不是按照 child node 顺序逐个总结。child node 的 title/scope 只用于理解覆盖范围，不应成为输出结构。
+上层正文 prompt 的重点是综合：输出应围绕当前层知识点组织，而不是按照 source 顺序逐个总结。
 
-是否继续向上由 `LayerDecisionRunner` 判断，同时受 `max_depth` 限制。父层节点还要满足 `min_child_nodes_per_parent`。
+是否继续向上由 `LayerDecisionRunner` 判断，同时受 `max_depth` 限制。上层节点还要满足 `min_child_nodes_per_parent`。同一个下层节点可以属于多个上层节点，因此 Wiki 结构是 DAG，不是严格树。
 
 ## 产物结构
 
@@ -186,7 +186,8 @@ viking://wiki/my_wiki/
 │   └── <doc_id>.card.json
 ├── nodes/
 │   └── <node_id>/
-│       ├── node.md
+│       ├── card.md
+│       ├── card.json
 │       ├── documents/
 │       │   └── 0001.md
 │       └── sources/
@@ -202,9 +203,10 @@ viking://wiki/my_wiki/
 
 - `nodes.json`：所有发现节点，包括层级、父子关系和 rejected 节点。
 - `source_assignments.json`：节点级来源引用和未分配来源。
-- `cards/*.card.json`：后续阶段使用的结构化 card。
-- `cards/*.card.md`：人类可读 card。
-- `nodes/<node_id>/node.md`：节点说明和边界。
+- `cards/*.card.json`：原始文档的结构化 card。
+- `cards/*.card.md`：原始文档的人类可读 card。
+- `nodes/<node_id>/card.json`：节点的结构化 card，供上层发现和来源引用使用。
+- `nodes/<node_id>/card.md`：节点的人类可读 card，替代旧 `node.md`。
 - `nodes/<node_id>/documents/*.md`：综合生成的节点正文。
 - `nodes/<node_id>/sources/*.ref.json`：该节点可用的来源列表。
 - `run/prompts.jsonl`：每次 LLM 调用的 prompt、schema name 和 schema hash。
@@ -219,11 +221,9 @@ viking://wiki/my_wiki/
 当前会调用 LLM 的阶段：
 
 - `document_card`
-- `bottom_node_discovery`
-- `parent_node_discovery`
-- `node_md`
+- `node_discovery`
 - `node_documents`
-- `parent_node_documents`
+- `node_card`
 - `next_layer_decision`
 
 文档生成阶段带结构化输出重试：如果模型返回的 JSON 外层可解析，但字段不符合 Pydantic 契约或生成了空 documents，会用同一个干净 prompt 最多重试 3 次。重试 prompt 不追加 Pydantic 错误细节，避免污染模型注意力。
@@ -233,7 +233,7 @@ Prompt 边界是产品契约的一部分：
 - 不能使用 benchmark question、gold answer、评测标签或目标答案。
 - 不能使用外部知识。
 - 每一步只能使用该阶段明确提供的资源、card 或子节点正文内容。
-- 父层正文必须综合多个子节点文档，不要按 child node 一段一段总结。
+- 上层正文必须综合多个下层 source 文档，不要按 source 一段一段总结。
 
 ## 服务侧接入
 

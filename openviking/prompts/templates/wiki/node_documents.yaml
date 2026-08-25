@@ -1,7 +1,7 @@
 metadata:
   id: "wiki.node_documents"
   name: "Wiki Node Documents"
-  description: "Generate synthesized documents for a Wiki node"
+  description: "Generate synthesized documents for a Wiki node from source sections"
   version: "1.0.0"
   language: "en"
   category: "wiki"
@@ -9,7 +9,7 @@ metadata:
 variables:
   - name: "input_json"
     type: "string"
-    description: "JSON encoded node and source document sections"
+    description: "JSON encoded node and source sections"
     required: true
 
 template: |
@@ -19,12 +19,13 @@ template: |
   - Write the synthesized Markdown content for this Wiki node. Use one document by default; split into multiple documents only to keep each document readable when the content is long.
   - Use only the section text provided in the input source documents.
   - Use the node title and scope as the topic boundary: include content inside this boundary, and exclude related but out-of-scope content.
+  - A source document may be an original resource document or a generated lower-layer Wiki node document.
   - Synthesize across source documents instead of summarizing each source separately.
   - Organize the content by synthesized knowledge, not by source document.
-  - Do not write one paragraph for doc 1, another paragraph for doc 2, and so on.
+  - Do not write one paragraph for source 1, another paragraph for source 2, and so on.
   - Each substantive paragraph should present a higher-level conclusion, pattern, mechanism, tradeoff, or comparison derived from multiple source documents whenever multiple relevant source documents are available.
   - Use source-specific details only as supporting material inside a synthesized paragraph, not as the paragraph's organizing principle.
-  - Avoid headings or paragraph openings that name or enumerate individual input documents.
+  - Avoid headings or paragraph openings that name or enumerate individual input sources.
   - Do not invent document IDs, section URIs, citations, URLs, or other identifiers.
   - If a factual statement cannot be supported by the provided source sections, do not include it.
 
@@ -33,7 +34,7 @@ template: |
 
   Output requirements:
   - documents: Markdown content for the Wiki node.
-  - The document must read like a new Wiki-level synthesis, not a sequence of per-document summaries.
+  - The document must read like a new Wiki-level synthesis, not a sequence of per-source summaries.
 
   Return only JSON matching the schema.
 

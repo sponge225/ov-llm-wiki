@@ -1,4 +1,4 @@
-"""Step 1: generate Wiki Document Cards."""
+"""Generate Wiki source cards."""
 
 from __future__ import annotations
 
@@ -8,9 +8,14 @@ import logging
 from pydantic import ValidationError
 
 from .llm import WikiLLMRunner
-from .prompts import build_document_card_prompt
-from .schemas import DocumentCard, DocumentCardContent, ResourceDocument
-
+from .prompts import build_document_card_prompt, build_node_card_prompt
+from .schemas import (
+    DocumentCard,
+    DocumentCardContent,
+    NodeDocument,
+    ResourceDocument,
+    WikiNode,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +42,47 @@ class DocumentCardGenerator:
 
     async def _generate_card(self, doc: ResourceDocument) -> DocumentCard:
         prompt = build_document_card_prompt(doc)
+        return await self._generate_card_from_prompt(
+            prompt=prompt,
+            step="doc_card",
+            retry_step="doc_card_retry",
+            doc_id=doc.doc_id,
+            resource_uri=doc.resource_uri,
+            title=doc.title,
+        )
+
+    async def generate_node_card(
+        self,
+        node: WikiNode,
+        documents: list[NodeDocument],
+        *,
+        resource_uri: str,
+    ) -> DocumentCard:
+        prompt = build_node_card_prompt(node, documents)
+        return await self._generate_card_from_prompt(
+            prompt=prompt,
+            step="node_card",
+            retry_step="node_card_retry",
+            doc_id=node.node_id,
+            resource_uri=resource_uri,
+            title=node.title,
+        )
+
+    async def _generate_card_from_prompt(
+        self,
+        *,
+        prompt: str,
+        step: str,
+        retry_step: str,
+        doc_id: str,
+        resource_uri: str,
+        title: str,
+    ) -> DocumentCard:
         last_error: Exception | None = None
         for attempt in range(1, 4):
             try:
                 result = await self.llm.complete_json(
-                    step="doc_card" if attempt == 1 else "doc_card_retry",
+                    step=step if attempt == 1 else retry_step,
                     prompt=prompt,
                     schema=DocumentCardContent.model_json_schema(),
                 )
@@ -52,8 +93,9 @@ class DocumentCardGenerator:
                 if attempt == 3:
                     raise
                 logger.info(
-                    "[Wiki] Retrying document card generation for doc_id=%s attempt=%d/3",
-                    doc.doc_id,
+                    "[Wiki] Retrying card generation for doc_id=%s step=%s attempt=%d/3",
+                    doc_id,
+                    step,
                     attempt,
                 )
         else:
@@ -62,9 +104,9 @@ class DocumentCardGenerator:
         card = DocumentCard.model_validate(
             {
                 **content.model_dump(mode="json"),
-                "doc_id": doc.doc_id,
-                "resource_uri": doc.resource_uri,
-                "title": doc.title,
+                "doc_id": doc_id,
+                "resource_uri": resource_uri,
+                "title": title,
             }
         )
         if not card.markdown:
@@ -76,11 +118,11 @@ def render_card_markdown(card: DocumentCard) -> str:
     main_points = "\n".join(f"- {item}" for item in card.main_points)
     terms = "\n".join(f"- {item}" for item in card.important_terms)
     topics = "\n".join(f"- {item}" for item in card.candidate_topics)
-    return f"""# Document Card: {card.title}
+    return f"""# Wiki Card: {card.title}
 
 ## Source Info
 
-- Resource URI: {card.resource_uri}
+- Source URI: {card.resource_uri}
 
 ## Summary
 

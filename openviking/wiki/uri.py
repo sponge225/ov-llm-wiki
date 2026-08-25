@@ -29,6 +29,10 @@ def card_md_uri(config: WikiConfig, doc_id: str) -> str:
     return f"{cards_dir(config)}{doc_id}.card.md"
 
 
+def card_json_uri(config: WikiConfig, doc_id: str) -> str:
+    return f"{cards_dir(config)}{doc_id}.card.json"
+
+
 def nodes_dir(config: WikiConfig) -> str:
     return f"{wiki_root(config)}nodes/"
 
@@ -37,8 +41,18 @@ def node_root_uri(config: WikiConfig, node_id: str) -> str:
     return f"{nodes_dir(config)}{sanitize_node_id(node_id)}/"
 
 
-def node_md_uri(config: WikiConfig, node_id: str) -> str:
-    return f"{node_root_uri(config, node_id)}node.md"
+def node_card_md_uri(config: WikiConfig, node_id: str) -> str:
+    return f"{node_root_uri(config, node_id)}card.md"
+
+
+def node_card_json_uri(config: WikiConfig, node_id: str) -> str:
+    return f"{node_root_uri(config, node_id)}card.json"
+
+
+def card_md_uri_for_card(config: WikiConfig, card) -> str:
+    if str(card.resource_uri).startswith("viking://wiki/"):
+        return node_card_md_uri(config, card.doc_id)
+    return card_md_uri(config, card.doc_id)
 
 
 def node_documents_dir(config: WikiConfig, node_id: str) -> str:

@@ -1,0 +1,38 @@
+metadata:
+  id: "wiki.node_discovery"
+  name: "Wiki Node Discovery"
+  description: "Aggregate source cards into current-layer Wiki nodes"
+  version: "1.0.0"
+  language: "en"
+  category: "wiki"
+
+variables:
+  - name: "input_json"
+    type: "string"
+    description: "JSON encoded source card records"
+    required: true
+
+template: |
+  Aggregate source cards into current-layer Wiki nodes.
+
+  Each output node must represent a reusable knowledge topic supported by multiple source cards.
+
+  Rules:
+  - Use only source_id, title, summary, and candidate_topics from the input source_records.
+  - Prefer a compact set of well-supported nodes over many narrow nodes.
+  - Merge closely related candidate topics into one stronger node.
+  - Create a separate node only when its scope is clearly distinct from existing nodes.
+  - Do not create one node per source card.
+  - Do not create broad catch-all or generic overview nodes.
+  - Each node should be supported by at least min_sources_per_node distinct source cards.
+  - A source card may support multiple Wiki nodes. Assign the same source_id to every node it substantively supports.
+  - supporting_source_ids must contain only source_id values from the input.
+  - merged_candidate_topics must contain candidate topic strings from the input that were merged into the node.
+  - unassigned_source_ids only includes source cards that do not substantively support any returned node.
+  - Do not return identifiers, hierarchy fields, status fields, counts, decisions, or reasons.
+
+  Input:
+  {{ input_json }}
+
+llm_config:
+  temperature: 0.0
