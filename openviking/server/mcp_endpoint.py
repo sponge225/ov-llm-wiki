@@ -4,7 +4,7 @@
 
 Exposes tools to Claude Code (or any MCP client) via streamable HTTP:
   find, search, read, list, remember, add_resource, grep, glob,
-  code_outline, code_search, code_expand, forget, health
+  context_tree, code_outline, code_search, code_expand, forget, health
 
 Mounted on the FastAPI app at /mcp. The MCP session manager lifecycle is
 tied to the FastAPI app lifespan (not a sub-app lifespan) so the task group
@@ -872,6 +872,35 @@ async def glob(pattern: str, uri: str = "viking://", node_limit: int = 100) -> s
     return "\n".join(lines)
 
 
+# -- context tree ----------------------------------------------------------
+
+
+@mcp.tool()
+async def context_tree(uri: str) -> str:
+    """Return a compact context tree for a viking:// URI.
+
+    The tree starts from the nearest directory-level parents of the input URI and expands downward: resource paths inside a document resolve to their direct parent resource directory; resource document roots resolve to Wiki nodes directly assigned that document; Wiki nodes resolve to their direct parent Wiki nodes, or themselves if they have no parent. The returned tree is complete below those roots and is not clipped to only the input path.
+
+    Refs: [N:<node_id>] is viking://wiki/nodes/<node_id>; [N:<node_id>:card] is viking://wiki/nodes/<node_id>/card.md; [D:<doc_id>] is resolved by the result's Document URI map. Resource directory/file URIs are formed by appending the tree path under [D:<doc_id>] to that document URI.
+    """
+    service = get_service()
+    result = await service.fs.context_tree(uri, ctx=_get_ctx())
+    lines = result.get("lines", []) if isinstance(result, dict) else []
+    if not lines:
+        return f"No context tree found for {uri}"
+
+    doc_map = result.get("document_uri_map", {}) if isinstance(result, dict) else {}
+    parts: list[str] = []
+    if doc_map:
+        parts.append("Document URI map:")
+        for doc_id in sorted(doc_map):
+            parts.append(f"- [D:{doc_id}] = {doc_map[doc_id]}")
+        parts.append("")
+    parts.append("Context tree:")
+    parts.extend(str(line) for line in lines)
+    return "\n".join(parts)
+
+
 # -- forget ----------------------------------------------------------------
 
 
@@ -1086,8 +1115,8 @@ async def mcp_lifespan():
     """Run the MCP session manager. Call this inside the FastAPI lifespan."""
     async with mcp.session_manager.run():
         logger.info(
-            "MCP endpoint ready (16 tools: find, search, recall, read, list, remember, "
-            "add_resource, list_watches, cancel_watch, grep, glob, forget, code_outline, "
+            "MCP endpoint ready (17 tools: find, search, recall, read, list, remember, "
+            "add_resource, list_watches, cancel_watch, grep, glob, context_tree, forget, code_outline, "
             "code_search, code_expand, health)"
         )
         yield

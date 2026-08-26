@@ -645,3 +645,11 @@ natural_language_processing_model_design_optimization_and_evaluation
 ```
 
 它的 `child_node_ids` 指向若干底层 active 节点。反过来，底层节点的 `parent_node_ids` 会追加对应父节点 ID；如果一个底层节点同时支撑多个上层节点，`parent_node_ids` 会保留多个父节点。
+
+## 17. Bot context tree 查询
+
+`context_tree` 是 MCP 侧给 bot 使用的只读查询工具，不参与 Wiki 生成。它读取 `nodes.json`、`source_assignments.json` 和 resource 文件树，把某个 `viking://` URI 附近的上下文压成一棵紧凑目录树。
+
+输入 resource 文档内部的文件或目录时，它从该路径的直接父 resource 目录开始向下展开，不跳到 Wiki DAG。输入完整文档 resource root 时，它从直接引用该文档的 Wiki nodes 出发，完整展开这些 nodes 的下游子图。输入 Wiki node URI 时，它从该 node 的直接父 nodes 出发；没有父节点时从自身出发。
+
+resource 展开有硬边界：只能从 `source_assignments.json` 里已知完整文档 root 或其子目录开始，不能从 `viking://`、`viking://resources` 或资源集合目录开始。输出使用 `[N:<node_id>]`、`[N:<node_id>:card]` 和 `[D:<doc_id>]` 短引用；完整文档 URI 只在 `Document URI map` 中出现一次。
