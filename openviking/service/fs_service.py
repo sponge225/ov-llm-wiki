@@ -27,13 +27,14 @@ from openviking.telemetry import get_current_telemetry
 from openviking.telemetry.request_wait_tracker import get_request_wait_tracker
 from openviking.telemetry.resource_summary import build_queue_status_payload
 from openviking.utils.embedding_utils import vectorize_directory_meta
-from openviking_cli.exceptions import DeadlineExceededError, NotInitializedError
+from openviking_cli.exceptions import DeadlineExceededError, NotFoundError, NotInitializedError
 from openviking_cli.utils import VikingURI, get_logger
 
 logger = get_logger(__name__)
 
 _WIKI_NODES_URI = "viking://wiki/nodes"
 _WIKI_NODES_JSON_URI = "viking://wiki/nodes.json"
+_WIKI_SOURCE_ASSIGNMENTS_URI = "viking://wiki/source_assignments.json"
 
 
 def _normalize_uri(uri: str | None) -> str:
@@ -155,6 +156,38 @@ def _wiki_parent_node_ids(node: dict[str, Any]) -> list[str]:
         return [str(parent_node_id) for parent_node_id in parent_node_ids if parent_node_id]
     parent_node_id = node.get("parent_node_id")
     return [str(parent_node_id)] if parent_node_id else []
+
+
+def _wiki_node_title(node: dict[str, Any] | None, node_id: str) -> str:
+    if node and node.get("title"):
+        return str(node["title"])
+    return node_id
+
+
+def _uri_leaf(uri: str) -> str:
+    normalized = _normalize_uri(uri)
+    if normalized == "viking://":
+        return normalized
+    return normalized.rsplit("/", 1)[-1]
+
+
+def _uri_parent(uri: str) -> str | None:
+    parent = VikingURI(uri).parent
+    return _normalize_uri(parent.uri) if parent else None
+
+
+def _is_descendant_uri(uri: str, root_uri: str) -> bool:
+    return uri.startswith(f"{root_uri}/")
+
+
+def _relative_uri_path(uri: str, root_uri: str) -> str:
+    normalized_uri = _normalize_uri(uri)
+    normalized_root = _normalize_uri(root_uri)
+    if normalized_uri == normalized_root:
+        return ""
+    if _is_descendant_uri(normalized_uri, normalized_root):
+        return normalized_uri[len(normalized_root) + 1 :]
+    return normalized_uri
 
 
 def _wiki_node_entry(node_id: str, node: dict[str, Any] | None, output: str) -> dict[str, Any]:
@@ -789,6 +822,245 @@ class FSService:
         payload = json.loads(content)
         nodes = payload.get("nodes") if isinstance(payload, dict) else payload
         return [node for node in nodes or [] if isinstance(node, dict)]
+
+    async def _read_wiki_source_assignments(
+        self, viking_fs: VikingFS, ctx: RequestContext
+    ) -> dict[str, Any]:
+        content = await viking_fs.read_file(_WIKI_SOURCE_ASSIGNMENTS_URI, ctx=ctx)
+        payload = json.loads(content)
+        return payload if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _wiki_document_refs_by_node(
+        source_assignments: dict[str, Any],
+    ) -> dict[str, list[dict[str, Any]]]:
+        refs_by_node = source_assignments.get("source_refs_by_node")
+        if not isinstance(refs_by_node, dict):
+            return {}
+
+        document_refs_by_node: dict[str, list[dict[str, Any]]] = {}
+        for node_id, refs in refs_by_node.items():
+            if not isinstance(refs, list):
+                continue
+            document_refs = [
+                ref
+                for ref in refs
+                if isinstance(ref, dict)
+                and ref.get("ref_type") == "document"
+                and ref.get("doc_id")
+                and ref.get("resource_uri")
+            ]
+            if document_refs:
+                document_refs_by_node[str(node_id)] = document_refs
+        return document_refs_by_node
+
+    @staticmethod
+    def _wiki_resource_document_roots(
+        document_refs_by_node: dict[str, list[dict[str, Any]]],
+    ) -> dict[str, dict[str, str]]:
+        roots: dict[str, dict[str, str]] = {}
+        for refs in document_refs_by_node.values():
+            for ref in refs:
+                root_uri = _normalize_uri(str(ref.get("resource_uri") or ""))
+                doc_id = str(ref.get("doc_id") or "")
+                if root_uri and doc_id:
+                    roots[root_uri] = {"doc_id": doc_id, "resource_uri": root_uri}
+        return roots
+
+    @staticmethod
+    def _wiki_context_roots_for_uri(
+        uri: str,
+        *,
+        nodes_by_id: dict[str, dict[str, Any]],
+        document_refs_by_node: dict[str, list[dict[str, Any]]],
+        document_roots: dict[str, dict[str, str]],
+    ) -> dict[str, Any]:
+        normalized = _normalize_uri(uri)
+        node_id = _wiki_node_id_from_uri(normalized)
+        if node_id:
+            node = nodes_by_id.get(node_id)
+            if not node:
+                return {"kind": "unmatched", "root_node_ids": [], "resource_tree_root": None}
+            parent_node_ids = [
+                parent_node_id
+                for parent_node_id in _wiki_parent_node_ids(node)
+                if parent_node_id in nodes_by_id
+            ]
+            return {
+                "kind": "wiki_node",
+                "root_node_ids": parent_node_ids or [node_id],
+                "resource_tree_root": None,
+                "document_root": None,
+            }
+
+        if normalized in document_roots:
+            root_node_ids = [
+                node_id
+                for node_id, refs in document_refs_by_node.items()
+                if any(_normalize_uri(str(ref.get("resource_uri") or "")) == normalized for ref in refs)
+            ]
+            return {
+                "kind": "resource_document_root",
+                "root_node_ids": root_node_ids,
+                "resource_tree_root": None,
+                "document_root": normalized,
+            }
+
+        matching_document_root = ""
+        for document_root in document_roots:
+            if _is_descendant_uri(normalized, document_root) and len(document_root) > len(
+                matching_document_root
+            ):
+                matching_document_root = document_root
+
+        if not matching_document_root:
+            return {"kind": "unmatched", "root_node_ids": [], "resource_tree_root": None}
+
+        parent_uri = _uri_parent(normalized)
+        if not parent_uri:
+            return {"kind": "unmatched", "root_node_ids": [], "resource_tree_root": None}
+        resource_tree_root = (
+            parent_uri
+            if parent_uri == matching_document_root
+            or _is_descendant_uri(parent_uri, matching_document_root)
+            else matching_document_root
+        )
+        return {
+            "kind": "resource_document_child",
+            "root_node_ids": [],
+            "resource_tree_root": resource_tree_root,
+            "document_root": matching_document_root,
+        }
+
+    async def context_tree(
+        self,
+        uri: str,
+        ctx: RequestContext,
+    ) -> dict[str, Any]:
+        """Return a compact directory tree around a Wiki or resource URI."""
+        viking_fs = self._ensure_initialized()
+        uri = validate_viking_uri(uri)
+        try:
+            nodes = await self._read_wiki_nodes(viking_fs, ctx)
+            source_assignments = await self._read_wiki_source_assignments(viking_fs, ctx)
+        except (NotFoundError, FileNotFoundError, KeyError):
+            return {"kind": "unmatched", "document_uri_map": {}, "lines": []}
+        nodes_by_id = {str(node.get("node_id")): node for node in nodes if node.get("node_id")}
+        document_refs_by_node = self._wiki_document_refs_by_node(source_assignments)
+        document_roots = self._wiki_resource_document_roots(document_refs_by_node)
+        roots = self._wiki_context_roots_for_uri(
+            uri,
+            nodes_by_id=nodes_by_id,
+            document_refs_by_node=document_refs_by_node,
+            document_roots=document_roots,
+        )
+
+        document_uri_map: dict[str, str] = {}
+        lines: list[str] = []
+
+        def add_line(line: str) -> None:
+            lines.append(line)
+
+        async def add_resource_tree(
+            *,
+            doc_id: str,
+            document_root: str,
+            tree_root: str,
+            indent: int,
+        ) -> None:
+            normalized_document_root = _normalize_uri(document_root)
+            normalized_tree_root = _normalize_uri(tree_root)
+            if not (
+                normalized_tree_root == normalized_document_root
+                or _is_descendant_uri(normalized_tree_root, normalized_document_root)
+            ):
+                return
+            document_uri_map.setdefault(doc_id, normalized_document_root)
+            rel_root = _relative_uri_path(normalized_tree_root, normalized_document_root)
+            root_label = f"{rel_root.rstrip('/')}/" if rel_root else f"{_uri_leaf(document_root)}/"
+            add_line(f"{'  ' * indent}- [D:{doc_id}] {root_label}")
+            try:
+                entries = await viking_fs.tree(
+                    normalized_tree_root,
+                    output="original",
+                    show_all_hidden=True,
+                    node_limit=None,
+                    level_limit=None,
+                    ctx=ctx,
+                )
+            except Exception as exc:
+                add_line(f"{'  ' * (indent + 1)}- (unable to list: {exc})")
+                return
+            for line in self._format_resource_tree_entries(entries, indent + 1):
+                add_line(line)
+
+        async def add_wiki_node(node_id: str, indent: int, path: set[str]) -> None:
+            node = nodes_by_id.get(node_id)
+            if not node:
+                return
+            title = _wiki_node_title(node, node_id)
+            if node_id in path:
+                add_line(f"{'  ' * indent}- [N:{node_id}] {title} (cycle)")
+                return
+            add_line(f"{'  ' * indent}- [N:{node_id}] {title}")
+            add_line(f"{'  ' * (indent + 1)}- [N:{node_id}:card] card.md")
+
+            next_path = {*path, node_id}
+            for child_node_id in _wiki_direct_child_node_ids(nodes, node_id):
+                await add_wiki_node(child_node_id, indent + 1, next_path)
+
+            for ref in document_refs_by_node.get(node_id, []):
+                await add_resource_tree(
+                    doc_id=str(ref.get("doc_id")),
+                    document_root=str(ref.get("resource_uri")),
+                    tree_root=str(ref.get("resource_uri")),
+                    indent=indent + 1,
+                )
+
+        if roots["kind"] == "resource_document_child":
+            document_root = str(roots["document_root"])
+            doc_meta = document_roots.get(document_root)
+            if doc_meta:
+                await add_resource_tree(
+                    doc_id=doc_meta["doc_id"],
+                    document_root=document_root,
+                    tree_root=str(roots["resource_tree_root"]),
+                    indent=0,
+                )
+        else:
+            for root_node_id in roots["root_node_ids"]:
+                await add_wiki_node(root_node_id, 0, set())
+
+        return {
+            "kind": roots["kind"],
+            "document_uri_map": document_uri_map,
+            "lines": lines,
+        }
+
+    @staticmethod
+    def _format_resource_tree_entries(entries: list[dict[str, Any]], indent: int) -> list[str]:
+        tree: dict[str, Any] = {}
+        is_dir_by_path: dict[str, bool] = {}
+        for entry in entries:
+            rel_path = str(entry.get("rel_path") or entry.get("name") or "").strip("/")
+            if not rel_path:
+                continue
+            is_dir_by_path[rel_path] = bool(entry.get("isDir"))
+            cursor = tree
+            for part in rel_path.split("/"):
+                cursor = cursor.setdefault(part, {})
+
+        lines: list[str] = []
+
+        def walk(node: dict[str, Any], prefix: str, level: int) -> None:
+            for name in sorted(node):
+                rel_path = f"{prefix}/{name}" if prefix else name
+                suffix = "/" if is_dir_by_path.get(rel_path) or node[name] else ""
+                lines.append(f"{'  ' * level}- {name}{suffix}")
+                walk(node[name], rel_path, level + 1)
+
+        walk(tree, "", indent)
+        return lines
 
     async def _grep_multiple_targets(
         self,

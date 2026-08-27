@@ -173,6 +173,16 @@ viking://resources/qasper_30_processed_docs/nested/paper_b
 
 是否继续向上由 `LayerDecisionRunner` 判断，同时受 `max_depth` 限制。上层节点还要满足 `min_child_nodes_per_parent`。同一个下层节点可以属于多个上层节点，因此 Wiki 结构是 DAG，不是严格树。
 
+### Bot context tree
+
+MCP 侧的 `context_tree` tool 用于给 bot 展示某个 `viking://` URI 附近的目录上下文。它不改变 Wiki 生成结果，只读取 `nodes.json`、`source_assignments.json` 和 resource 文件树。
+
+- 输入 resource 文档内部的文件或目录时，从该路径的直接父 resource 目录开始向下展开，不进入 Wiki DAG。
+- 输入完整文档 resource root 时，从直接引用该文档的 Wiki nodes 出发，完整展开这些 nodes 的下游子图。
+- 输入 Wiki node URI 时，从它的直接父 nodes 出发；没有父节点时从自身出发。
+- resource 树只允许从已知完整文档 root 或其子目录展开，禁止从 `viking://`、`viking://resources` 或资源集合目录展开。
+- 输出使用 `[N:<node_id>]` 和 `[D:<doc_id>]` 短引用，完整文档 URI 只在结果的 `Document URI map` 中出现一次。
+
 ## 产物结构
 
 假设 `wiki_root_uri` 是 `viking://wiki/my_wiki/`，管线会写出：

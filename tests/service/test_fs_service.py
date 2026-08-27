@@ -14,12 +14,14 @@ from openviking_cli.session.user_id import UserIdentifier
 
 
 class _FakeVikingFS:
-    def __init__(self, *, rm_error=None, read_files=None):
+    def __init__(self, *, rm_error=None, read_files=None, trees=None):
         self.rm_calls = []
         self.mv_calls = []
         self.grep_calls = []
+        self.tree_calls = []
         self.rm_error = rm_error
         self.read_files = read_files or {}
+        self.trees = trees or {}
 
     async def rm(self, uri, recursive=False, ctx=None):
         self.rm_calls.append({"uri": uri, "recursive": recursive, "ctx": ctx})
@@ -32,6 +34,29 @@ class _FakeVikingFS:
 
     async def read_file(self, uri, ctx=None):
         return self.read_files[uri]
+
+    async def tree(
+        self,
+        uri,
+        output="original",
+        abs_limit=256,
+        show_all_hidden=False,
+        node_limit=1000,
+        level_limit=3,
+        ctx=None,
+    ):
+        self.tree_calls.append(
+            {
+                "uri": uri,
+                "output": output,
+                "abs_limit": abs_limit,
+                "show_all_hidden": show_all_hidden,
+                "node_limit": node_limit,
+                "level_limit": level_limit,
+                "ctx": ctx,
+            }
+        )
+        return self.trees.get(uri.rstrip("/"), [])
 
     async def grep(
         self,
@@ -325,6 +350,310 @@ async def test_ls_wiki_node_lists_documents_and_child_nodes(request_context):
     assert all(entry["isDir"] for entry in result)
     assert "evidence.jsonl" not in {entry["name"] for entry in result}
     assert "sources" not in {entry["name"] for entry in result}
+
+
+def _wiki_context_files():
+    nodes_json = json.dumps(
+        {
+            "nodes": [
+                {
+                    "node_id": "nlp_systems",
+                    "title": "NLP Systems",
+                    "parent_node_ids": [],
+                    "child_node_ids": ["retrieval_qa", "domain_adaptation"],
+                },
+                {
+                    "node_id": "retrieval_qa",
+                    "title": "Retrieval QA",
+                    "parent_node_ids": ["nlp_systems"],
+                    "child_node_ids": [],
+                },
+                {
+                    "node_id": "domain_adaptation",
+                    "title": "Domain Adaptation",
+                    "parent_node_ids": ["nlp_systems"],
+                    "child_node_ids": [],
+                },
+                {
+                    "node_id": "evaluation",
+                    "title": "Evaluation",
+                    "parent_node_ids": [],
+                    "child_node_ids": [],
+                },
+            ]
+        }
+    )
+    assignments_json = json.dumps(
+        {
+            "source_refs_by_node": {
+                "retrieval_qa": [
+                    {
+                        "ref_type": "document",
+                        "doc_id": "paper_a",
+                        "resource_uri": "viking://resources/papers/paper_a",
+                    },
+                    {
+                        "ref_type": "document",
+                        "doc_id": "paper_b",
+                        "resource_uri": "viking://resources/papers/paper_b",
+                    },
+                ],
+                "domain_adaptation": [
+                    {
+                        "ref_type": "document",
+                        "doc_id": "paper_c",
+                        "resource_uri": "viking://resources/papers/paper_c",
+                    }
+                ],
+                "evaluation": [
+                    {
+                        "ref_type": "document",
+                        "doc_id": "paper_a",
+                        "resource_uri": "viking://resources/papers/paper_a",
+                    },
+                    {
+                        "ref_type": "document",
+                        "doc_id": "paper_d",
+                        "resource_uri": "viking://resources/papers/paper_d",
+                    },
+                ],
+            }
+        }
+    )
+    return {
+        "viking://wiki/nodes.json": nodes_json,
+        "viking://wiki/source_assignments.json": assignments_json,
+    }
+
+
+def _resource_tree(*names):
+    return [
+        {
+            "name": name.rsplit("/", 1)[-1],
+            "rel_path": name,
+            "uri": f"viking://resources/papers/doc/{name}",
+            "isDir": name.endswith("/"),
+        }
+        for name in names
+    ]
+
+
+@pytest.mark.asyncio
+async def test_context_tree_resource_file_starts_from_direct_parent(request_context):
+    viking_fs = _FakeVikingFS(
+        read_files=_wiki_context_files(),
+        trees={
+            "viking://resources/papers/paper_a/section_1": _resource_tree(
+                ".abstract.md",
+                ".overview.md",
+                "method.md",
+                "results.md",
+            )
+        },
+    )
+    service = FSService(viking_fs=viking_fs)
+
+    result = await service.context_tree(
+        "viking://resources/papers/paper_a/section_1/method.md",
+        ctx=request_context,
+    )
+
+    assert result["kind"] == "resource_document_child"
+    assert "input_uri" not in result
+    assert viking_fs.tree_calls[0]["uri"] == "viking://resources/papers/paper_a/section_1"
+    assert viking_fs.tree_calls[0]["show_all_hidden"] is True
+    assert result["document_uri_map"] == {"paper_a": "viking://resources/papers/paper_a"}
+    assert result["lines"] == [
+        "- [D:paper_a] section_1/",
+        "  - .abstract.md",
+        "  - .overview.md",
+        "  - method.md",
+        "  - results.md",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_context_tree_resource_directory_starts_from_direct_parent(request_context):
+    viking_fs = _FakeVikingFS(
+        read_files=_wiki_context_files(),
+        trees={
+            "viking://resources/papers/paper_a": _resource_tree(
+                ".abstract.md",
+                "section_1/",
+                "section_1/method.md",
+            )
+        },
+    )
+    service = FSService(viking_fs=viking_fs)
+
+    result = await service.context_tree(
+        "viking://resources/papers/paper_a/section_1",
+        ctx=request_context,
+    )
+
+    assert result["kind"] == "resource_document_child"
+    assert viking_fs.tree_calls[0]["uri"] == "viking://resources/papers/paper_a"
+    assert result["lines"] == [
+        "- [D:paper_a] paper_a/",
+        "  - .abstract.md",
+        "  - section_1/",
+        "    - method.md",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_context_tree_document_root_uses_directly_assigned_nodes(request_context):
+    viking_fs = _FakeVikingFS(
+        read_files=_wiki_context_files(),
+        trees={
+            "viking://resources/papers/paper_a": _resource_tree(".abstract.md", "a.md"),
+            "viking://resources/papers/paper_b": _resource_tree("b.md"),
+            "viking://resources/papers/paper_d": _resource_tree("d.md"),
+        },
+    )
+    service = FSService(viking_fs=viking_fs)
+
+    result = await service.context_tree(
+        "viking://resources/papers/paper_a",
+        ctx=request_context,
+    )
+
+    assert result["kind"] == "resource_document_root"
+    assert result["lines"] == [
+        "- [N:retrieval_qa] Retrieval QA",
+        "  - [N:retrieval_qa:card] card.md",
+        "  - [D:paper_a] paper_a/",
+        "    - .abstract.md",
+        "    - a.md",
+        "  - [D:paper_b] paper_b/",
+        "    - b.md",
+        "- [N:evaluation] Evaluation",
+        "  - [N:evaluation:card] card.md",
+        "  - [D:paper_a] paper_a/",
+        "    - .abstract.md",
+        "    - a.md",
+        "  - [D:paper_d] paper_d/",
+        "    - d.md",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_context_tree_wiki_node_uses_direct_parent_roots(request_context):
+    viking_fs = _FakeVikingFS(
+        read_files=_wiki_context_files(),
+        trees={
+            "viking://resources/papers/paper_a": _resource_tree("a.md"),
+            "viking://resources/papers/paper_b": _resource_tree("b.md"),
+            "viking://resources/papers/paper_c": _resource_tree("c.md"),
+        },
+    )
+    service = FSService(viking_fs=viking_fs)
+
+    result = await service.context_tree(
+        "viking://wiki/nodes/retrieval_qa",
+        ctx=request_context,
+    )
+
+    assert result["kind"] == "wiki_node"
+    assert result["lines"] == [
+        "- [N:nlp_systems] NLP Systems",
+        "  - [N:nlp_systems:card] card.md",
+        "  - [N:retrieval_qa] Retrieval QA",
+        "    - [N:retrieval_qa:card] card.md",
+        "    - [D:paper_a] paper_a/",
+        "      - a.md",
+        "    - [D:paper_b] paper_b/",
+        "      - b.md",
+        "  - [N:domain_adaptation] Domain Adaptation",
+        "    - [N:domain_adaptation:card] card.md",
+        "    - [D:paper_c] paper_c/",
+        "      - c.md",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_context_tree_wiki_node_with_multiple_parents_expands_each_parent(
+    request_context,
+):
+    nodes_json = json.dumps(
+        {
+            "nodes": [
+                {
+                    "node_id": "retrieval_qa",
+                    "title": "Retrieval QA",
+                    "parent_node_ids": [],
+                    "child_node_ids": ["evidence_grounding"],
+                },
+                {
+                    "node_id": "evaluation",
+                    "title": "Evaluation",
+                    "parent_node_ids": [],
+                    "child_node_ids": ["evidence_grounding"],
+                },
+                {
+                    "node_id": "evidence_grounding",
+                    "title": "Evidence Grounding",
+                    "parent_node_ids": ["retrieval_qa", "evaluation"],
+                    "child_node_ids": [],
+                },
+            ]
+        }
+    )
+    assignments_json = json.dumps(
+        {
+            "source_refs_by_node": {
+                "evidence_grounding": [
+                    {
+                        "ref_type": "document",
+                        "doc_id": "paper_a",
+                        "resource_uri": "viking://resources/papers/paper_a",
+                    }
+                ]
+            }
+        }
+    )
+    viking_fs = _FakeVikingFS(
+        read_files={
+            "viking://wiki/nodes.json": nodes_json,
+            "viking://wiki/source_assignments.json": assignments_json,
+        },
+        trees={"viking://resources/papers/paper_a": _resource_tree("a.md")},
+    )
+    service = FSService(viking_fs=viking_fs)
+
+    result = await service.context_tree(
+        "viking://wiki/nodes/evidence_grounding",
+        ctx=request_context,
+    )
+
+    assert result["kind"] == "wiki_node"
+    assert result["lines"] == [
+        "- [N:retrieval_qa] Retrieval QA",
+        "  - [N:retrieval_qa:card] card.md",
+        "  - [N:evidence_grounding] Evidence Grounding",
+        "    - [N:evidence_grounding:card] card.md",
+        "    - [D:paper_a] paper_a/",
+        "      - a.md",
+        "- [N:evaluation] Evaluation",
+        "  - [N:evaluation:card] card.md",
+        "  - [N:evidence_grounding] Evidence Grounding",
+        "    - [N:evidence_grounding:card] card.md",
+        "    - [D:paper_a] paper_a/",
+        "      - a.md",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_context_tree_does_not_expand_resource_roots_or_collections(request_context):
+    viking_fs = _FakeVikingFS(read_files=_wiki_context_files())
+    service = FSService(viking_fs=viking_fs)
+
+    for uri in ["viking://", "viking://resources", "viking://resources/papers"]:
+        result = await service.context_tree(uri, ctx=request_context)
+        assert result["kind"] == "unmatched"
+        assert result["lines"] == []
+
+    assert viking_fs.tree_calls == []
 
 
 @pytest.mark.asyncio
