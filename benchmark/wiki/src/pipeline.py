@@ -155,21 +155,40 @@ class BenchmarkPipeline:
             ) from first_err
 
         sorted_results = [results_map[i] for i in sorted(results_map.keys())]
+        successful_results = [r for r in sorted_results if r.get("generation_failed") is not True]
+        failed_count = len(sorted_results) - len(successful_results)
         dataset_name = self.config.get('dataset_name', 'Unknown_Dataset')
         save_data = {
-            "summary": {"dataset": dataset_name, "total_queries": len(sorted_results)},
+            "summary": {
+                "dataset": dataset_name,
+                "total_queries": len(sorted_results),
+                "generation_failed_queries": failed_count,
+            },
             "results": sorted_results
         }
-        total = len(sorted_results)
-        if total > 0:
-            self._update_report({
-                    "Query Efficiency (Average Per Query)": {
-                        "Average Retrieval Time (s)": sum(r['retrieval']['latency_sec'] for r in sorted_results) / total,
-                        "Average Input Tokens": sum(r['token_usage']['total_input_tokens'] for r in sorted_results) / total,
-                        "Average Output Tokens": sum(r['token_usage']['llm_output_tokens'] for r in sorted_results) / total,
-                    }
+        successful_total = len(successful_results)
+        self._update_report({
+                "Generation": {
+                    "Total Queries": len(sorted_results),
+                    "Generation Failed Queries": failed_count,
+                    "Successful Queries": successful_total,
+                },
+                "Query Efficiency (Average Per Query)": {
+                    "Average Retrieval Time (s)": (
+                        sum(r['retrieval']['latency_sec'] for r in successful_results) / successful_total
+                        if successful_total else 0
+                    ),
+                    "Average Input Tokens": (
+                        sum(r['token_usage']['total_input_tokens'] for r in successful_results) / successful_total
+                        if successful_total else 0
+                    ),
+                    "Average Output Tokens": (
+                        sum(r['token_usage']['llm_output_tokens'] for r in successful_results) / successful_total
+                        if successful_total else 0
+                    ),
                 }
-            )
+            }
+        )
         with open(self.generated_file, "w", encoding="utf-8") as f:
             json.dump(save_data, f, indent=2, ensure_ascii=False)
 
@@ -184,7 +203,11 @@ class BenchmarkPipeline:
             data = json.load(f)
             items = data.get("results", [])
 
-        eval_items = items
+        eval_items = [
+            item for item in items
+            if item.get("generation_failed") is not True
+        ]
+        skipped_failed_count = len(items) - len(eval_items)
         eval_results_map = {}
         task_errors = []
         
@@ -220,17 +243,31 @@ class BenchmarkPipeline:
         with open(self.eval_file, "w", encoding="utf-8") as f:
             json.dump({"results": eval_records}, f, indent=2, ensure_ascii=False)
 
-        if total > 0:
-            self._update_report({
-                "Dataset": self.config.get('dataset_name', 'Unknown_Dataset'),
-                "Total Queries Evaluated": total,
-                "Performance Metrics": {
-                    "Average F1 Score": sum(r['metrics']['F1'] for r in eval_records) / total,
-                    "Average Recall": sum(r['metrics']['Recall'] for r in eval_records) / total,
-                    "Average Accuracy (Hit 0-4)": sum(r['metrics']['Accuracy'] for r in eval_records) / total,
-                    "Average Accuracy (normalization)": (sum(r['metrics']['Accuracy'] for r in eval_records) / total)/4,
-                }
-            })
+        self._update_report({
+            "Dataset": self.config.get('dataset_name', 'Unknown_Dataset'),
+            "Total Queries": len(items),
+            "Generation Failed Queries": skipped_failed_count,
+            "Skipped Failed Queries": skipped_failed_count,
+            "Total Queries Evaluated": total,
+            "Performance Metrics": {
+                "Average F1 Score": (
+                    sum(r['metrics']['F1'] for r in eval_records) / total
+                    if total else 0
+                ),
+                "Average Recall": (
+                    sum(r['metrics']['Recall'] for r in eval_records) / total
+                    if total else 0
+                ),
+                "Average Accuracy (Hit 0-4)": (
+                    sum(r['metrics']['Accuracy'] for r in eval_records) / total
+                    if total else 0
+                ),
+                "Average Accuracy (normalization)": (
+                    (sum(r['metrics']['Accuracy'] for r in eval_records) / total) / 4
+                    if total else 0
+                ),
+            }
+        })
 
     def run_deletion(self):
         """Step 5: Cleanup"""
@@ -310,6 +347,8 @@ class BenchmarkPipeline:
             return {
                 "_global_index": task['id'], "sample_id": task['sample_id'], "question": qa.question,
                 "gold_answers": qa.gold_answers, "category": str(qa.category), "evidence": qa.evidence,
+                "generation_failed": False,
+                "generation_failure_reason": "",
                 "retrieval": {"latency_sec": latency, "uris": retrieved_uris},
                 "llm": {"final_answer": ans},
                 "metrics": {"Recall": recall}, "token_usage": {"total_input_tokens": in_tokens, "llm_output_tokens": out_tokens}
@@ -333,58 +372,93 @@ class BenchmarkPipeline:
 
             ans = str(vikingbot_result.get("answer", "") or "")
             stripped_ans = ans.strip()
+            token_usage = vikingbot_result.get("token_usage", {}) or {}
+            prompt_tokens = int(token_usage.get("prompt_tokens", token_usage.get("input_tokens", 0)) or 0)
+            completion_tokens = int(token_usage.get("completion_tokens", token_usage.get("output_tokens", 0)) or 0)
             if (
                 not stripped_ans
                 or stripped_ans.startswith("[ERROR]")
                 or stripped_ans.lower().startswith("error calling llm")
             ):
-                raise RuntimeError(ans.strip() or "VikingBot returned an empty answer")
+                failure_reason = stripped_ans or "VikingBot returned an empty answer"
+                self.logger.error(f"[Query-{task['id']}] VikingBot generation failed: {failure_reason}")
+                result = self._build_vikingbot_result(
+                    task=task,
+                    qa=qa,
+                    ans=ans,
+                    vikingbot_result=vikingbot_result,
+                    generation_failed=True,
+                    failure_reason=failure_reason,
+                )
+                self.monitor.worker_end(success=False)
+                return result
 
-            trace_file = self._write_vikingbot_trace(task['id'], vikingbot_result.get("trace"))
-            total_time_sec = float(vikingbot_result.get("total_time_sec", 0) or 0)
-            token_usage = vikingbot_result.get("token_usage", {}) or {}
-            prompt_tokens = int(token_usage.get("prompt_tokens", token_usage.get("input_tokens", 0)) or 0)
-            completion_tokens = int(token_usage.get("completion_tokens", token_usage.get("output_tokens", 0)) or 0)
-            total_tokens = int(token_usage.get("total_tokens") or (prompt_tokens + completion_tokens))
+            result = self._build_vikingbot_result(
+                task=task,
+                qa=qa,
+                ans=ans,
+                vikingbot_result=vikingbot_result,
+                generation_failed=False,
+                failure_reason="",
+            )
             self.monitor.worker_end(tokens=prompt_tokens + completion_tokens)
 
             self.logger.info(
                 f"[Query-{task['id']}] VikingBot | "
                 f"Iterations: {vikingbot_result.get('iterations_used', 0)} | "
-                f"Time: {total_time_sec:.1f}s"
+                f"Time: {float(vikingbot_result.get('total_time_sec', 0) or 0):.1f}s"
             )
 
-            return {
-                "_global_index": task['id'], "sample_id": task['sample_id'], "question": qa.question,
-                "gold_answers": qa.gold_answers, "category": str(qa.category), "evidence": qa.evidence,
-                "retrieval": {"latency_sec": total_time_sec, "uris": []},
-                "llm": {"final_answer": ans},
-                "vikingbot": {
-                    "answer": ans,
-                    "iterations_used": int(vikingbot_result.get("iterations_used", 0) or 0),
-                    "tools_used_names": vikingbot_result.get("tools_used_names", []),
-                    "tools_used": vikingbot_result.get("tools_used", []),
-                    "total_time_sec": total_time_sec,
-                    "debug_log": vikingbot_result.get("debug_log", ""),
-                    "session_id": vikingbot_result.get("session_id", ""),
-                    "stderr_output": vikingbot_result.get("stderr_output", ""),
-                    "stdout_output": vikingbot_result.get("stdout_output", ""),
-                    "ov_conf_path": vikingbot_result.get("ov_conf_path", ""),
-                    "trace_file": trace_file,
-                },
-                "metrics": {"Recall": 0.0},
-                "token_usage": {
-                    "total_input_tokens": 0,
-                    "llm_output_tokens": 0,
-                    "retrieval_embedding_tokens": 0,
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": total_tokens,
-                },
-            }
+            return result
         except Exception:
             self.monitor.worker_end(success=False)
             raise
+
+    def _build_vikingbot_result(
+        self,
+        task,
+        qa,
+        ans,
+        vikingbot_result,
+        generation_failed=False,
+        failure_reason="",
+    ):
+        trace_file = self._write_vikingbot_trace(task['id'], vikingbot_result.get("trace"))
+        total_time_sec = float(vikingbot_result.get("total_time_sec", 0) or 0)
+        token_usage = vikingbot_result.get("token_usage", {}) or {}
+        prompt_tokens = int(token_usage.get("prompt_tokens", token_usage.get("input_tokens", 0)) or 0)
+        completion_tokens = int(token_usage.get("completion_tokens", token_usage.get("output_tokens", 0)) or 0)
+        total_tokens = int(token_usage.get("total_tokens") or (prompt_tokens + completion_tokens))
+        return {
+            "_global_index": task['id'], "sample_id": task['sample_id'], "question": qa.question,
+            "gold_answers": qa.gold_answers, "category": str(qa.category), "evidence": qa.evidence,
+            "generation_failed": generation_failed,
+            "generation_failure_reason": failure_reason,
+            "retrieval": {"latency_sec": total_time_sec, "uris": []},
+            "llm": {"final_answer": "" if generation_failed else ans},
+            "vikingbot": {
+                "answer": ans,
+                "iterations_used": int(vikingbot_result.get("iterations_used", 0) or 0),
+                "tools_used_names": vikingbot_result.get("tools_used_names") or [],
+                "tools_used": vikingbot_result.get("tools_used") or [],
+                "total_time_sec": total_time_sec,
+                "debug_log": vikingbot_result.get("debug_log") or "",
+                "session_id": vikingbot_result.get("session_id") or "",
+                "stderr_output": vikingbot_result.get("stderr_output") or "",
+                "stdout_output": vikingbot_result.get("stdout_output") or "",
+                "ov_conf_path": vikingbot_result.get("ov_conf_path") or "",
+                "trace_file": trace_file,
+            },
+            "metrics": {"Recall": 0.0},
+            "token_usage": {
+                "total_input_tokens": 0,
+                "llm_output_tokens": 0,
+                "retrieval_embedding_tokens": 0,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+            },
+        }
 
     def _write_vikingbot_trace(self, task_id, trace):
         if not trace:
