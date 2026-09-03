@@ -115,8 +115,8 @@ def main():
     parser.add_argument("--config", default=default_config_path,
                         help=f"Path to config file. Default: {default_config_path}")
 
-    parser.add_argument("--step", choices=["all", "import", "build_wiki", "gen", "eval", "gen+eval", "del"], default="all",
-                        help="Execution step: 'import', 'build_wiki', 'gen', 'eval', 'gen+eval', 'del', or 'all'")
+    parser.add_argument("--step", choices=["all", "import", "build_wiki", "clear_wiki", "gen", "eval", "gen+eval", "del"], default="all",
+                        help="Execution step: 'import', 'build_wiki', 'clear_wiki', 'gen', 'eval', 'gen+eval', 'del', or 'all'")
 
     parser.add_argument("--ov-conf", type=str, default=None,
                         help="Path to ov.conf file (default: benchmark/wiki/ov.conf)")
@@ -225,6 +225,7 @@ def main():
             mode == BASELINE_MODE
             or will_import
             or args.step == "build_wiki"
+            or args.step == "clear_wiki"
             or (args.step == "all" and build_wiki_enabled)
             or args.step == "del"
         )
@@ -275,6 +276,10 @@ def main():
         if args.step == "build_wiki":
             logger.info("Stage: Build Wiki")
             pipeline.run_build_wiki()
+
+        if args.step == "clear_wiki":
+            logger.info("Stage: Clear Wiki")
+            pipeline.run_clear_wiki()
 
         if args.step in ["all", "gen", "gen+eval"]:
             if mode == VIKINGBOT_MODE and pipeline.db is not None:

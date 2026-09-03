@@ -87,6 +87,7 @@ class WikiService:
             "card_input_mode": card_input_mode,
             "wiki_root_uri": wiki_root_uri,
             "resource_uris": normalized_resource_uris,
+            "token_usage": pipeline.get_token_usage(),
         }
 
     async def clear_wiki(

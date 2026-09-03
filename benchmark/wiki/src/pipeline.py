@@ -129,15 +129,29 @@ class BenchmarkPipeline:
             card_input_mode=wiki_card_input_mode,
             max_card_input_chars=wiki_max_card_input_chars,
         )
+        token_usage = wiki_stats.get("token_usage") or {}
+        total_usage = token_usage.get("total_usage") or {}
+        self.metrics_summary["wiki_generation"] = {
+            "time": wiki_stats["time"],
+            "input_tokens": total_usage.get("prompt_tokens", 0),
+            "output_tokens": total_usage.get("completion_tokens", 0),
+            "total_tokens": total_usage.get("total_tokens", 0),
+            "call_count": total_usage.get("call_count", 0),
+        }
         self.logger.info(f"Wiki build finished. Time: {wiki_stats['time']:.2f}s")
         self._update_report({
             "Wiki Generation": {
                 "Total Wiki Build Time (s)": wiki_stats["time"],
+                "Total Input Tokens": total_usage.get("prompt_tokens", 0),
+                "Total Output Tokens": total_usage.get("completion_tokens", 0),
+                "Total Tokens": total_usage.get("total_tokens", 0),
+                "LLM Call Count": total_usage.get("call_count", 0),
                 "Resource Roots": resource_uris,
                 "Status": wiki_stats.get("status"),
                 "Cards": wiki_stats.get("cards", 0),
                 "Nodes": wiki_stats.get("nodes", 0),
                 "Node Contexts": wiki_stats.get("node_contexts", 0),
+                "Token Usage": token_usage,
             }
         })
         return wiki_stats
@@ -312,6 +326,27 @@ class BenchmarkPipeline:
                 "Total Output Tokens": 0
             }
         })
+
+    def run_clear_wiki(self):
+        """Stage: Clear generated Wiki assets only."""
+        self.logger.info(">>> Stage: Clear Wiki")
+        if not self.db:
+            raise RuntimeError("Cannot clear Wiki without a vector store")
+        start_time = time.time()
+        result = self.db.clear_wiki()
+        duration = time.time() - start_time
+        self.logger.info(f"Wiki cleanup finished. Time: {duration:.2f}s")
+
+        self._update_report({
+            "Wiki Cleanup": {
+                "Total Wiki Cleanup Time (s)": duration,
+                "Status": result.get("status"),
+                "Wiki Root URI": result.get("wiki_root_uri"),
+                "Cleared": result.get("cleared"),
+                "Missing": result.get("missing"),
+            }
+        })
+        return result
 
     def _prepare_tasks(self, samples):
         tasks = []

@@ -72,6 +72,9 @@ class WikiPipeline:
         self.content_generator = NodeContentGenerator(self.llm)
         self.layer_decision_runner = LayerDecisionRunner(self.llm)
 
+    def get_token_usage(self) -> dict[str, Any]:
+        return self.llm.get_token_usage()
+
     async def run_from_inputs(
         self,
         docs: list[WikiResourceInput],
