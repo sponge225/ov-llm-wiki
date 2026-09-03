@@ -77,6 +77,13 @@ class WikiLLMRunner:
         )
         return result
 
+    def get_token_usage(self) -> dict[str, Any]:
+        get_usage = getattr(self.vlm, "get_token_usage", None)
+        if not callable(get_usage):
+            return {}
+        usage = get_usage()
+        return usage if isinstance(usage, dict) else {}
+
 
 def _hash_text(value: str) -> str:
     return f"sha256:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"

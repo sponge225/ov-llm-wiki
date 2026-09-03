@@ -227,6 +227,10 @@ class StructuredVLM:
         )
         return parse_json_from_response(response)
 
+    def get_token_usage(self) -> Dict[str, Any]:
+        """Get token usage from the underlying VLM."""
+        return self._get_vlm().get_token_usage()
+
     def complete_model(
         self,
         prompt: str,

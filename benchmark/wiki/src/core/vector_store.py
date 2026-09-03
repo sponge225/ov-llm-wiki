@@ -156,6 +156,9 @@ class VikingStoreWrapper:
         except Exception:
             pass
 
+    def clear_wiki(self) -> dict:
+        return self.client.clear_wiki()
+
     def close(self):
         """Release the underlying OpenViking client if supported."""
         close = getattr(self.client, "close", None)
