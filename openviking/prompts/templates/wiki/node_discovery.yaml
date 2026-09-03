@@ -24,7 +24,7 @@ template: |
   - Create a separate node only when its scope is clearly distinct from existing nodes.
   - Do not create one node per source card.
   - Do not create broad catch-all or generic overview nodes.
-  - Each node should be supported by at least min_sources_per_node distinct source cards.
+  - Each node should be supported by at least {{ min_sources_per_node }} distinct source cards.
   - A source card may support multiple Wiki nodes. Assign the same source_id to every node it substantively supports.
   - supporting_source_ids must contain only source_id values from the input.
   - merged_candidate_topics must contain candidate topic strings from the input that were merged into the node.

@@ -301,6 +301,18 @@ def main():
         print(f"\n[Fatal Error] Program execution error: {str(e)}")
         sys.exit(1)
     finally:
+        pipeline_obj = locals().get("pipeline")
+        db = getattr(pipeline_obj, "db", None)
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                if 'logger' in locals():
+                    logger.exception("Failed to close vector store")
+                else:
+                    print("[Warning] Failed to close vector store")
+            finally:
+                pipeline_obj.db = None
         stop_openviking_server()
 
 if __name__ == "__main__":

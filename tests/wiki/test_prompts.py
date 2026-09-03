@@ -82,7 +82,9 @@ def test_node_discovery_prompt_uses_only_card_index_fields():
     assert '"summary"' in prompt
     assert '"candidate_topics"' in prompt
     assert '"source_id": "OARW_1"' in prompt
+    assert "at least 3 distinct source cards" in prompt
     assert '"min_sources_per_node": 3' in prompt
+    assert "at least min_sources_per_node distinct source cards" not in prompt
     assert '"source_unit_count": 1' in prompt
     assert '"main_points"' not in prompt
     assert "viking://resources/" not in prompt

@@ -263,6 +263,10 @@ class AsyncHTTPClient(import_openviking_sdk().AsyncHTTPClient):
         response = await self._request("POST", "/api/v1/wiki/clear", json=payload)
         return self._handle_response_data(response).get("result", {})
 
+    async def context_tree(self, uri: str) -> str:
+        response = await self._request("GET", "/api/v1/fs/context_tree", params={"uri": uri})
+        return self._handle_response_data(response).get("result", "")
+
 
 class SyncHTTPClient(import_openviking_sdk().SyncHTTPClient):
     def __init__(self, *args, **kwargs):
@@ -326,6 +330,9 @@ class SyncHTTPClient(import_openviking_sdk().SyncHTTPClient):
                 telemetry=telemetry,
             )
         )
+
+    def context_tree(self, uri: str) -> str:
+        return run_async(self._async_client.context_tree(uri))
 
     def commit_session(
         self,
