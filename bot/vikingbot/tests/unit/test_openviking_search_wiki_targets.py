@@ -142,6 +142,40 @@ class FakeVikingGrepTool(VikingGrepTool):
 
 
 @pytest.mark.asyncio
+async def test_openviking_search_default_target_filters_to_detail_level():
+    client = FakeVikingClient()
+    tool = FakeVikingSearchTool(client)
+
+    await tool.execute(ToolContext(), query="steam")
+
+    assert client.search_calls == [
+        {
+            "query": "steam",
+            "target_uri": "",
+            "limit": 10,
+            "level": [2],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_openviking_search_respects_explicit_level_override():
+    client = FakeVikingClient()
+    tool = FakeVikingSearchTool(client)
+
+    await tool.execute(ToolContext(), query="steam", level=[0, 1])
+
+    assert client.search_calls == [
+        {
+            "query": "steam",
+            "target_uri": "",
+            "limit": 10,
+            "level": [0, 1],
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_openviking_search_includes_wiki_nodes_for_actor_peer_default_target():
     client = FakeVikingClient(actor_peer_id="cli-user")
     tool = FakeVikingSearchTool(client)
@@ -153,6 +187,11 @@ async def test_openviking_search_includes_wiki_nodes_for_actor_peer_default_targ
     assert "viking://wiki/nodes" in target_uris
     assert "viking://user/memories/" in target_uris
     assert "viking://user/skills/" in target_uris
+    levels_by_target = {call["target_uri"]: call.get("level") for call in client.search_calls}
+    assert levels_by_target["viking://resources/"] == [2]
+    assert levels_by_target["viking://wiki/nodes"] == [2]
+    assert levels_by_target["viking://user/memories/"] is None
+    assert levels_by_target["viking://user/skills/"] is None
 
 
 @pytest.mark.asyncio
@@ -203,6 +242,11 @@ async def test_openviking_search_includes_wiki_nodes_for_sender_fanout_default_t
     assert ("viking://wiki/nodes", None) in target_calls
     assert ("viking://user/owner-a/memories/", "owner-a") in target_calls
     assert ("viking://user/owner-a/skills/", "owner-a") in target_calls
+    levels_by_target = {call["target_uri"]: call.get("level") for call in client.search_calls}
+    assert levels_by_target["viking://resources/"] == [2]
+    assert levels_by_target["viking://wiki/nodes"] == [2]
+    assert levels_by_target["viking://user/owner-a/memories/"] is None
+    assert levels_by_target["viking://user/owner-a/skills/"] is None
 
 
 @pytest.mark.asyncio

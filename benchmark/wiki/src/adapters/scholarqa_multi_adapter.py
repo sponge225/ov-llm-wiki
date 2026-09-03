@@ -1,4 +1,4 @@
-"""Adapter for the valid 101-question ScholarQA-Multi benchmark scope."""
+"""Adapter for the cleaned ScholarQA-Multi benchmark scope."""
 
 from __future__ import annotations
 
@@ -13,12 +13,11 @@ from typing import Any, List
 from .base import BaseAdapter, StandardDoc, StandardQA, StandardSample
 
 
-EXPECTED_QAS = 101
+EXPECTED_QAS = 92
 EXPECTED_DOCUMENTS = 413
 EXPECTED_SUBJECT_COUNTS = {
     "bio": 19,
     "biophysics": 9,
-    "cs_hci": 9,
     "cs_nlp": 29,
     "photonics": 29,
     "physics": 6,

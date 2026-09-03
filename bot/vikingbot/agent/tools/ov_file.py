@@ -331,6 +331,11 @@ class VikingSearchTool(OVFileTool):
                     "description": "Minimum relevance score threshold",
                     "default": 0.35,
                 },
+                "level": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Optional context levels to search. Defaults to [2] for resources/wiki nodes to exclude directory L0/L1 summaries.",
+                },
             },
             "required": ["query"],
         }
@@ -462,6 +467,17 @@ class VikingSearchTool(OVFileTool):
         }
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
+    @staticmethod
+    def _default_level_for_target(target_uri: str) -> list[int] | None:
+        normalized = (target_uri or "").rstrip("/")
+        if (
+            not normalized
+            or normalized.startswith("viking://resources")
+            or normalized.startswith("viking://wiki/nodes")
+        ):
+            return [2]
+        return None
+
     async def execute(
         self,
         tool_context: "ToolContext",
@@ -540,6 +556,11 @@ class VikingSearchTool(OVFileTool):
                     "target_uri": search_target_uri,
                     "limit": 10,
                 }
+                level = kwargs.get("level")
+                if level is None:
+                    level = self._default_level_for_target(search_target_uri)
+                if level is not None:
+                    search_kwargs["level"] = level
                 if search_user_id:
                     search_kwargs["user_id"] = search_user_id
                 results = await client.search(query, **search_kwargs)

@@ -1,9 +1,10 @@
 """Download and prepare the valid ScholarQA-Multi benchmark subset.
 
 ScholarQA-Multi contains expert answers grounded in short citation contexts. Seven
-of the 108 upstream records contain citation indices outside their ``ctxs`` lists.
-This handler rejects those records and materializes the remaining citation contexts
-as a shared corpus of merged TXT documents.
+of the 108 upstream records contain citation indices outside their ``ctxs`` lists,
+and nine ``bohao_cs`` records have CS/HCI questions paired with duplicated
+photonics answers and contexts. This handler rejects those records and materializes
+the remaining citation contexts as a shared corpus of merged TXT documents.
 """
 
 from __future__ import annotations
@@ -30,12 +31,11 @@ SCHOLARQA_URL = (
 SCHOLARQA_SHA256 = "83af055a691a8a0be078cb2a02813193a3fc2966091b28bd51824b43049fffea"
 
 EXPECTED_TOTAL_QAS = 108
-EXPECTED_VALID_QAS = 101
+EXPECTED_VALID_QAS = 92
 EXPECTED_DOCUMENTS = 413
 EXPECTED_SUBJECT_COUNTS = {
     "bio": 19,
     "biophysics": 9,
-    "cs_hci": 9,
     "cs_nlp": 29,
     "photonics": 29,
     "physics": 6,
@@ -49,6 +49,18 @@ EXPECTED_INVALID_QA_IDS = {
     "weijia_cs_2",
     "yanyu_photonics_10",
 }
+EXPECTED_MISMATCHED_QA_IDS = {
+    "bohao_cs_1",
+    "bohao_cs_2",
+    "bohao_cs_3",
+    "bohao_cs_4",
+    "bohao_cs_5",
+    "bohao_cs_6",
+    "bohao_cs_7",
+    "bohao_cs_8",
+    "bohao_cs_9",
+}
+EXPECTED_EXCLUDED_QA_IDS = EXPECTED_INVALID_QA_IDS | EXPECTED_MISMATCHED_QA_IDS
 
 _CITATION_GROUP_RE = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
 _SEMANTIC_SCHOLAR_URL_RE = re.compile(
@@ -160,6 +172,8 @@ def select_valid_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         }
         if invalid_indices:
             invalid_ids.add(qa_id)
+            continue
+        if qa_id in EXPECTED_MISMATCHED_QA_IDS:
             continue
         valid_records.append(record)
         subject = str(record["subject"]).strip()
@@ -385,7 +399,9 @@ def _write_dataset(source_path: Path, dataset_dir: Path) -> None:
                 "selection": "all_records_without_out_of_range_citation_indices",
                 "original_question_count": len(records),
                 "valid_question_count": len(valid_records),
-                "excluded_question_ids": sorted(EXPECTED_INVALID_QA_IDS),
+                "excluded_question_ids": sorted(EXPECTED_EXCLUDED_QA_IDS),
+                "excluded_out_of_range_citation_ids": sorted(EXPECTED_INVALID_QA_IDS),
+                "excluded_mismatched_question_answer_ids": sorted(EXPECTED_MISMATCHED_QA_IDS),
                 "subject_counts": EXPECTED_SUBJECT_COUNTS,
                 "document_count": len(manifest),
                 "corpus_format": "merged_official_citation_contexts_as_txt",
@@ -492,7 +508,7 @@ def prepare_scholarqa_multi_valid_101(
         "revision": SCHOLARQA_REVISION,
         "original_total_qas": EXPECTED_TOTAL_QAS,
         "sampled_total_qas": EXPECTED_VALID_QAS,
-        "excluded_qa_ids": sorted(EXPECTED_INVALID_QA_IDS),
+        "excluded_qa_ids": sorted(EXPECTED_EXCLUDED_QA_IDS),
         "sampled_num_docs": len(manifest),
         "subjects": EXPECTED_SUBJECT_COUNTS,
         "is_full": False,
