@@ -113,6 +113,12 @@ def test_generation_writes_failed_vikingbot_records_without_aborting(tmp_path, m
     assert report["Generation"]["Generation Failed Queries"] == 1
     assert report["Generation"]["Successful Queries"] == 1
     assert report["Query Efficiency (Average Per Query)"]["Average Retrieval Time (s)"] == 1.5
+    assert report["Query Efficiency (Average Per Query)"]["Average Input Tokens"] == 2
+    assert report["Query Efficiency (Average Per Query)"]["Average Output Tokens"] == 3
+    assert results[1]["token_usage"]["total_input_tokens"] == 2
+    assert results[1]["token_usage"]["llm_output_tokens"] == 3
+    assert results[1]["token_usage"]["prompt_tokens"] == 2
+    assert results[1]["token_usage"]["completion_tokens"] == 3
 
 
 def test_vikingbot_error_result_is_recorded_as_generation_failure(tmp_path, monkeypatch):

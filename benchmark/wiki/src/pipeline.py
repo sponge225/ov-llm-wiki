@@ -43,6 +43,33 @@ class BenchmarkPipeline:
             "deletion": {"time": 0, "input_tokens": 0, "output_tokens": 0, "embedding_tokens": 0}
         }
 
+    @staticmethod
+    def _token_usage_value(token_usage, primary_key, fallback_key):
+        if not isinstance(token_usage, dict):
+            return 0
+        primary_value = token_usage.get(primary_key)
+        if primary_value not in (None, ""):
+            value = int(primary_value or 0)
+            if value:
+                return value
+        return int(token_usage.get(fallback_key, 0) or 0)
+
+    @classmethod
+    def _query_input_tokens(cls, result):
+        return cls._token_usage_value(
+            result.get("token_usage") or {},
+            "total_input_tokens",
+            "prompt_tokens",
+        )
+
+    @classmethod
+    def _query_output_tokens(cls, result):
+        return cls._token_usage_value(
+            result.get("token_usage") or {},
+            "llm_output_tokens",
+            "completion_tokens",
+        )
+
     def run_import(self):
         """Stage: Import documents into the OpenViking store."""
         self.logger.info(">>> Stage: Import")
@@ -179,11 +206,11 @@ class BenchmarkPipeline:
                         if successful_total else 0
                     ),
                     "Average Input Tokens": (
-                        sum(r['token_usage']['total_input_tokens'] for r in successful_results) / successful_total
+                        sum(self._query_input_tokens(r) for r in successful_results) / successful_total
                         if successful_total else 0
                     ),
                     "Average Output Tokens": (
-                        sum(r['token_usage']['llm_output_tokens'] for r in successful_results) / successful_total
+                        sum(self._query_output_tokens(r) for r in successful_results) / successful_total
                         if successful_total else 0
                     ),
                 }
@@ -451,8 +478,8 @@ class BenchmarkPipeline:
             },
             "metrics": {"Recall": 0.0},
             "token_usage": {
-                "total_input_tokens": 0,
-                "llm_output_tokens": 0,
+                "total_input_tokens": prompt_tokens,
+                "llm_output_tokens": completion_tokens,
                 "retrieval_embedding_tokens": 0,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
