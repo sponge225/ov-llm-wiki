@@ -639,6 +639,23 @@ class VikingClient:
             if should_close:
                 await client.close()
 
+    async def context_tree(self, uri: str, user_id: Optional[str] = None) -> str:
+        """Get the compact context tree around a resource or Wiki URI."""
+        client = self.client
+        should_close = False
+        scoped_user_id = user_id or self._owner_user_id_for_uri(uri)
+        if scoped_user_id:
+            client, should_close = await self._get_user_scoped_client(scoped_user_id)
+
+        try:
+            return await client.context_tree(uri)
+        except Exception as e:
+            logger.warning(f"Failed to get context tree for {uri}: {e}")
+            return ""
+        finally:
+            if should_close:
+                await client.close()
+
     async def read_user_profile(self, user_id: str) -> str:
         """读取用户 profile。"""
         effective_user_id = self._effective_user_id(user_id)

@@ -39,7 +39,11 @@ def build_node_discovery_prompt(
         "min_sources_per_node": min_sources_per_node,
         "source_records": [_source_card_payload(card) for card in cards],
     }
-    return _render_wiki_prompt("wiki.node_discovery", inputs)
+    return _render_wiki_prompt(
+        "wiki.node_discovery",
+        inputs,
+        min_sources_per_node=min_sources_per_node,
+    )
 
 
 def build_node_card_prompt(node: WikiNode, documents: list[NodeDocument]) -> str:

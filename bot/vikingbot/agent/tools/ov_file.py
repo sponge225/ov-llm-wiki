@@ -236,6 +236,69 @@ class VikingListTool(OVFileTool):
             await self._release_client(tool_context, client)
 
 
+class VikingContextTreeTool(OVFileTool):
+    """Tool to inspect the compact context tree around a Viking URI."""
+
+    @property
+    def name(self) -> str:
+        return "openviking_context_tree"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Compact navigation tool for filling the context gap around a single known "
+            "viking:// URI: expand the nearby Wiki/resource structure, understand where that URI "
+            "sits, and choose the next precise URI(s) to read. "
+            "In the output, [N:<node_id>] means viking://wiki/nodes/<node_id>, "
+            "[N:<node_id>:card] means viking://wiki/nodes/<node_id>/card.md, and [D:<doc_id>] "
+            "must be resolved through the Document URI map. Resource directory/file URIs are "
+            "formed by appending the tree path under [D:<doc_id>] to that document URI."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "uri": {
+                    "type": "string",
+                    "description": "The Viking URI to inspect, such as viking://wiki/nodes/... or viking://resources/...",
+                },
+            },
+            "required": ["uri"],
+        }
+
+    async def execute(
+        self,
+        tool_context: "ToolContext",
+        uri: str,
+        **kwargs: Any,
+    ) -> str:
+        client = None
+        try:
+            client = await self._get_client(tool_context)
+            result = await client.context_tree(uri)
+            if isinstance(result, dict):
+                lines = result.get("lines", [])
+                if not lines:
+                    return f"No context tree found for {uri}"
+                doc_map = result.get("document_uri_map", {})
+                parts: list[str] = []
+                if doc_map:
+                    parts.append("Document URI map:")
+                    for doc_id in sorted(doc_map):
+                        parts.append(f"- [D:{doc_id}] = {doc_map[doc_id]}")
+                    parts.append("")
+                parts.append("Context tree:")
+                parts.extend(str(line) for line in lines)
+                return "\n".join(parts)
+            return result or f"No context tree found for {uri}"
+        except Exception as e:
+            return f"Error getting OpenViking context tree: {str(e)}"
+        finally:
+            await self._release_client(tool_context, client)
+
+
 class VikingSearchTool(OVFileTool):
     """Tool to search Viking resources."""
 

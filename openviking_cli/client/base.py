@@ -199,6 +199,11 @@ class BaseClient(ABC):
         ...
 
     @abstractmethod
+    async def context_tree(self, uri: str) -> str:
+        """Get the compact context tree around a resource or Wiki URI."""
+        ...
+
+    @abstractmethod
     async def stat(self, uri: str) -> Dict[str, Any]:
         """Get resource status."""
         ...

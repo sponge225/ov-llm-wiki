@@ -7,8 +7,8 @@ adapter:
 
 execution:
   mode: "vikingbot"
-  server_port: 2026
-  max_workers: 1
+  server_port: 2027
+  max_workers: 8
   retrieval_topk: 5
   max_queries: null
   skip_ingestion: false

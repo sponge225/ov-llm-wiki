@@ -3,6 +3,7 @@
 """Media-related utilities for OpenViking."""
 
 import asyncio
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -114,6 +115,13 @@ async def generate_image_summary(
     Returns:
         Dictionary with "name" and "summary" keys
     """
+    if os.environ.get("OPENVIKING_SKIP_IMAGE_SUMMARY", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return {"name": original_filename, "summary": "Image summary skipped"}
+
     viking_fs = get_viking_fs()
     vlm = get_openviking_config().vlm
     file_name = original_filename

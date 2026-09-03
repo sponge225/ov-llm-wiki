@@ -812,6 +812,11 @@ class AsyncOpenViking:
             node_limit=node_limit,
         )
 
+    async def context_tree(self, uri: str) -> str:
+        """Get the compact context tree around a resource or Wiki URI."""
+        await self._ensure_initialized()
+        return await self._client.context_tree(uri)
+
     async def mkdir(self, uri: str, description: Optional[str] = None) -> None:
         """Create directory"""
         await self._ensure_initialized()

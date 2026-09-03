@@ -7,6 +7,7 @@ raw_data/
 # Processed datasets (sampled subsets)
 datasets/*
 data/
+raw_data/
 
 # Processed documents and vector storage
 ov_storage/

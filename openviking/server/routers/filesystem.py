@@ -136,6 +136,26 @@ async def tree(
     return Response(status="ok", result=result)
 
 
+@router.get("/context_tree")
+async def context_tree(
+    uri: str = Query(..., description="Viking URI"),
+    _ctx: RequestContext = Depends(get_request_context),
+):
+    """Get the compact context tree around a resource or Wiki URI."""
+    service = get_service()
+    uri = resolve_path_variables(uri)
+    try:
+        result = await service.fs.context_tree(uri, ctx=_ctx)
+    except AGFSNotFoundError:
+        raise NotFoundError(uri, "file")
+    except AGFSClientError as e:
+        mapped = map_exception(e, resource=uri, resource_type="file")
+        if mapped is not None:
+            raise mapped from e
+        raise
+    return Response(status="ok", result=result)
+
+
 @router.get("/stat")
 async def stat(
     uri: str = Query(..., description="Viking URI"),

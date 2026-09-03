@@ -661,6 +661,10 @@ class LocalClient(BaseClient):
         """Read raw file content, including hidden MEMORY_FIELDS metadata."""
         return await self._service.fs.read(uri, ctx=self._ctx, offset=offset, limit=limit)
 
+    async def context_tree(self, uri: str) -> str:
+        """Get the compact context tree around a resource or Wiki URI."""
+        return await self._service.fs.context_tree(uri, ctx=self._ctx)
+
     async def abstract(self, uri: str) -> str:
         """Read L0 abstract."""
         return await self._service.fs.abstract(uri, ctx=self._ctx)

@@ -678,6 +678,10 @@ class SyncOpenViking:
         """Get directory tree"""
         return run_async(self._async_client.tree(uri, **kwargs))
 
+    def context_tree(self, uri: str) -> str:
+        """Get the compact context tree around a resource or Wiki URI."""
+        return run_async(self._async_client.context_tree(uri))
+
     def stat(self, uri: str) -> Dict:
         """Get resource status"""
         return run_async(self._async_client.stat(uri))

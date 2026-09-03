@@ -32,14 +32,18 @@ Available OpenViking tools may include:
 | `openviking_list` | Browsing a Viking URI hierarchy |
 | `openviking_grep` | Regex or exact-text search inside OpenViking content |
 | `openviking_glob` | Finding resources by URI or filename pattern |
+| `openviking_context_tree` | Inspecting the compact Wiki/resource tree around a known `viking://` URI |
 | `openviking_add_resource` | Persisting and indexing a URL or local file in OpenViking |
 | `openviking_memory_commit` | Explicitly storing durable personal memory |
 
 ### Retrieval Workflow
 
 - Use `openviking_search` when the request is conceptual or semantic. Search results contain URIs and summaries, not necessarily full content.
+- Use `openviking_context_tree` as a compact navigation tool to fill the context gap around a single known `viking://` URI: expand the nearby Wiki/resource structure, understand where that URI sits, and choose the next precise URI(s) to read.
+- In `openviking_context_tree` output, `[N:<node_id>]` means `viking://wiki/nodes/<node_id>`, `[N:<node_id>:card]` means `viking://wiki/nodes/<node_id>/card.md`, and `[D:<doc_id>]` must be resolved through the output's Document URI map. Resource file/directory URIs are formed by appending the tree path under `[D:<doc_id>]` to that document URI.
 - Use `openviking_multi_read` on the relevant result URIs before relying on details that are not present in the summary. Batch independent URIs in one call.
 - Use `openviking_grep` for known text or regex patterns, `openviking_glob` for path patterns, and `openviking_list` to explore a known directory.
+- Prefer `openviking_context_tree` over broad recursive `openviking_list` calls for Wiki/resource exploration, because it returns the surrounding context tree for the target URI in a compact form.
 - Avoid repeating the same search intent within one turn. Search again when a follow-up asks for a different fact or when the stored state may have changed.
 - For questions about the user's remembered facts, preferences, profile, or personal context, search OpenViking before concluding that no record exists.
 
