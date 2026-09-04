@@ -3,8 +3,6 @@
 import asyncio
 import itertools
 import json
-import os
-import re
 import time
 from abc import ABC
 from pathlib import Path
@@ -304,10 +302,6 @@ class VikingContextTreeTool(OVFileTool):
 class VikingSearchTool(OVFileTool):
     """Tool to search Viking resources."""
 
-    _WIKI_NODE_DOCUMENT_RE = re.compile(
-        r"^viking://wiki/nodes/(?P<node_id>[^/]+)/documents/[^/]+$"
-    )
-
     @property
     def name(self) -> str:
         return "openviking_search"
@@ -448,23 +442,15 @@ class VikingSearchTool(OVFileTool):
     def _build_group_json(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         group_items: list[dict[str, Any]] = []
         for index, item in enumerate(items, 1):
-            uri = item["uri"]
-            output_item = {
-                "index": index,
-                "uri": uri,
-                "abstract": item["abstract"],
-                "is_leaf": item["is_leaf"],
-                "score": round(item["score"], 6),
-            }
-            if VikingSearchTool._WIKI_NODE_DOCUMENT_RE.match(uri):
-                output_item["kind"] = "wiki_node_document"
-                output_item["recommended_action"] = (
-                    "Read this wiki node with openviking_multi_read when a synthesized "
-                    "topic overview is useful. Verify exact facts against source documents "
-                    "when the question asks for thresholds, counts, IDs, owners, versions, "
-                    "or approved wording."
-                )
-            group_items.append(output_item)
+            group_items.append(
+                {
+                    "index": index,
+                    "uri": item["uri"],
+                    "abstract": item["abstract"],
+                    "is_leaf": item["is_leaf"],
+                    "score": round(item["score"], 6),
+                }
+            )
         return group_items
 
     def _format_search_items_json(
@@ -996,10 +982,7 @@ class VikingMultiReadTool(OVFileTool):
 
     @property
     def description(self) -> str:
-        return (
-            "Read full content from multiple OpenViking resources concurrently. "
-            "Returns complete content for all URIs with no truncation."
-        )
+        return "Read full content from multiple OpenViking resources concurrently. Returns complete content for all URIs with no truncation."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -1063,10 +1046,6 @@ class VikingMultiReadTool(OVFileTool):
                 result_lines.append(f"\n--- START OF {uri} ---")
                 if success:
                     result_lines.append(content)
-                    if self._wiki_source_reference_hints_enabled():
-                        source_hint = await self._wiki_source_reference_hint(client, uri)
-                        if source_hint:
-                            result_lines.append(source_hint)
                 else:
                     result_lines.append(f"ERROR: {content}")
                 result_lines.append(f"--- END OF {uri} ---")
@@ -1078,79 +1057,3 @@ class VikingMultiReadTool(OVFileTool):
             return f"Error multi-reading Viking resources: {str(e)}"
         finally:
             await self._release_client(tool_context, client)
-
-    _WIKI_NODE_DOCUMENT_RE = re.compile(
-        r"^viking://wiki/nodes/(?P<node_id>[^/]+)/documents/[^/]+$"
-    )
-
-    @staticmethod
-    def _wiki_source_reference_hints_enabled() -> bool:
-        return os.getenv("OPENVIKING_WIKI_SOURCE_REF_HINTS", "").lower() in {
-            "1",
-            "true",
-            "yes",
-        }
-
-    async def _wiki_source_reference_hint(self, client: Any, uri: str) -> str:
-        match = self._WIKI_NODE_DOCUMENT_RE.match(uri)
-        if not match:
-            return ""
-        node_id = match.group("node_id")
-        sources_uri = f"viking://wiki/nodes/{node_id}/sources/"
-        try:
-            entries = await client.list_resources(path=sources_uri, recursive=False)
-        except Exception as exc:
-            logger.debug(f"Skip Wiki source refs for {uri}: failed to list {sources_uri}: {exc}")
-            return ""
-
-        ref_uris = [
-            str(entry.get("uri") or "")
-            for entry in entries
-            if str(entry.get("uri") or "").endswith(".ref.json")
-        ]
-        if not ref_uris:
-            return ""
-
-        max_refs = 5
-        refs: list[dict[str, Any]] = []
-        for ref_uri in ref_uris[:max_refs]:
-            try:
-                raw = await client.read_content(ref_uri, level="read")
-                ref = json.loads(raw)
-            except Exception as exc:
-                logger.debug(f"Skip Wiki source ref {ref_uri}: {exc}")
-                continue
-            resource_uri = str(ref.get("resource_uri") or "")
-            if not resource_uri:
-                continue
-            refs.append(
-                {
-                    "title": ref.get("title") or ref.get("doc_id") or ref.get("ref_id"),
-                    "resource_uri": resource_uri,
-                    "matched_topics": ref.get("matched_topics") or [],
-                }
-            )
-
-        if not refs:
-            return ""
-
-        lines = [
-            "",
-            "Wiki source references for exact fact verification:",
-            (
-                "The Wiki node above is a synthesized overview. For exact thresholds, "
-                "IDs, owners, versions, counts, approval rules, and customer-facing "
-                "wording, use these source URIs only when they are directly relevant."
-            ),
-        ]
-        for index, ref in enumerate(refs, 1):
-            lines.append(f"{index}. {ref['resource_uri']}")
-            if ref.get("title"):
-                lines.append(f"   title: {ref['title']}")
-            topics = ref.get("matched_topics") or []
-            if topics:
-                topic_preview = "; ".join(str(topic) for topic in topics[:3])
-                lines.append(f"   topics: {topic_preview}")
-        if len(ref_uris) > max_refs:
-            lines.append(f"... {len(ref_uris) - max_refs} additional source ref(s) omitted.")
-        return "\n".join(lines)

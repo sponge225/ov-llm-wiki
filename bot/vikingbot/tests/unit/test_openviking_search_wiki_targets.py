@@ -61,22 +61,10 @@ class FakeVikingSearchTool(VikingSearchTool):
 class FakeReadClient:
     def __init__(self):
         self.read_calls = []
-        self.list_calls = []
-        self.source_refs = {}
 
     async def read_content(self, uri: str, level: str = "read") -> str:
         self.read_calls.append((uri, level))
-        if uri in self.source_refs:
-            return self.source_refs[uri]
         return f"content for {uri}"
-
-    async def list_resources(self, path: str | None = None, recursive: bool = False):
-        self.list_calls.append((path, recursive))
-        return [
-            {"uri": uri, "name": uri.rsplit("/", 1)[-1], "isDir": False, "size": len(content)}
-            for uri, content in self.source_refs.items()
-            if path and uri.startswith(path)
-        ]
 
     async def close(self) -> None:
         pass
@@ -187,29 +175,6 @@ async def test_openviking_search_respects_explicit_level_override():
     ]
 
 
-def test_openviking_search_marks_wiki_node_documents():
-    payload = VikingSearchTool._format_search_items_json(
-        VikingSearchTool(),
-        {
-            "memory": [],
-            "resource": [
-                {
-                    "uri": "viking://wiki/nodes/steam_community/documents/0001.md",
-                    "abstract": "Steam community overview",
-                    "is_leaf": True,
-                    "score": 0.9,
-                }
-            ],
-            "skill": [],
-        },
-        min_score=0.35,
-    )
-
-    assert '"kind": "wiki_node_document"' in payload
-    assert "synthesized topic overview" in payload
-    assert "Verify exact facts against source documents" in payload
-
-
 @pytest.mark.asyncio
 async def test_openviking_search_includes_wiki_nodes_for_actor_peer_default_target():
     client = FakeVikingClient(actor_peer_id="cli-user")
@@ -296,48 +261,3 @@ async def test_openviking_multi_read_supports_wiki_node_documents():
     assert f"--- START OF {uri} ---" in result
     assert f"content for {uri}" in result
     assert f"--- END OF {uri} ---" in result
-
-
-@pytest.mark.asyncio
-async def test_openviking_multi_read_does_not_add_wiki_node_source_refs_by_default():
-    client = FakeReadClient()
-    client.source_refs = {
-        "viking://wiki/nodes/steam_community/sources/source_a.ref.json": (
-            '{"resource_uri":"viking://resources/docs/source-a.md",'
-            '"title":"Source A","matched_topics":["policy","threshold"]}'
-        )
-    }
-    tool = FakeVikingMultiReadTool(client)
-    uri = "viking://wiki/nodes/steam_community/documents/0001.md"
-
-    result = await tool.execute(ToolContext(), uris=[uri])
-
-    assert client.list_calls == []
-    assert ("viking://wiki/nodes/steam_community/sources/source_a.ref.json", "read") not in client.read_calls
-    assert "Wiki source references for exact fact verification:" not in result
-    assert "viking://resources/docs/source-a.md" not in result
-
-
-@pytest.mark.asyncio
-async def test_openviking_multi_read_adds_wiki_node_source_refs_when_enabled(monkeypatch):
-    monkeypatch.setenv("OPENVIKING_WIKI_SOURCE_REF_HINTS", "1")
-    client = FakeReadClient()
-    client.source_refs = {
-        "viking://wiki/nodes/steam_community/sources/source_a.ref.json": (
-            '{"resource_uri":"viking://resources/docs/source-a.md",'
-            '"title":"Source A","matched_topics":["policy","threshold"]}'
-        )
-    }
-    tool = FakeVikingMultiReadTool(client)
-    uri = "viking://wiki/nodes/steam_community/documents/0001.md"
-
-    result = await tool.execute(ToolContext(), uris=[uri])
-
-    assert client.list_calls == [
-        ("viking://wiki/nodes/steam_community/sources/", False)
-    ]
-    assert ("viking://wiki/nodes/steam_community/sources/source_a.ref.json", "read") in client.read_calls
-    assert "Wiki source references for exact fact verification:" in result
-    assert "viking://resources/docs/source-a.md" in result
-    assert "title: Source A" in result
-    assert "topics: policy; threshold" in result

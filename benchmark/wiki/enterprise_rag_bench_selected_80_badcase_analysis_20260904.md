@@ -48,17 +48,17 @@ Source refs drilldown 实验：80 条 QA，平均分 2.39；相对 baseline 改�
 - 新实验中实际读取 wiki node 的 8 条，平均分差为 -1.375；其中 6 条退化。
 - 大部分退化样本没有 source refs hint，因此不能把整体 40 条退化全部归因给 source refs。
 
-能支持的优化结论是：source refs 不应该默认强推，尤其不能用 “should read” 提示把 agent 引向更多无约束读取。应改成默认关闭或被动信息，并作为独立实验变量验证。
+能支持的优化结论是：source refs 不应该默认强推，尤其不能用 “should read” 提示把 agent 引向更多无约束读取。因为这轮实验整体明显劣化，代码应先回退到上一有效版本；如果后续还要验证 source refs，只能作为新的、范围更窄的独立实验重新设计。
 
 ## 下一轮可验证优化假设
 
-优先级 1：回滚或默认关闭 source refs hint。当前已采用“默认关闭 + 显式开关”的保守调整。
+优先级 1：回滚 source refs hint 失败实验。当前已回退失败实验代码，后续调优从上一有效版本重新开始。
 
 - 支撑样本：Q20、Q27、Q76 出现 hint 后未改善；Q27 读 wiki node 后进入长链路但没有读到正确原文。
 - 修改位置：`bot/vikingbot/agent/tools/ov_file.py` 的 wiki node search 展示和 `VikingMultiReadTool._wiki_source_reference_hint`。
 - 预期收益：消除当前失败实验引入的默认行为风险，避免默认 benchmark token 膨胀。
-- 风险：可能失去 Q18 这类个别收益。因此应保留显式开关用于后续窄实验，而不是删除能力。
-- 实施方式：默认不追加 source refs；只有设置 `OPENVIKING_WIKI_SOURCE_REF_HINTS=1` 时才在读取 wiki node 后追加最多 5 条 source refs，并将提示文案从强制 `should read` 改为“仅在直接相关时使用”。
+- 风险：可能失去 Q18 这类个别收益。但这 1 条收益不足以支撑保留一个导致整体劣化的默认行为。
+- 实施方式：恢复 `bot/vikingbot/agent/tools/ov_file.py` 和相关单测到 source refs 实验之前的代码状态，删除失败实验配置文件；保留本分析文档和失败实验 output 作为后续参考。
 
 优先级 2：针对旧/新版本冲突做 wiki 生成或检索层优化。
 
