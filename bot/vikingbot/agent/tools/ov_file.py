@@ -3,6 +3,7 @@
 import asyncio
 import itertools
 import json
+import os
 import re
 import time
 from abc import ABC
@@ -458,8 +459,10 @@ class VikingSearchTool(OVFileTool):
             if VikingSearchTool._WIKI_NODE_DOCUMENT_RE.match(uri):
                 output_item["kind"] = "wiki_node_document"
                 output_item["recommended_action"] = (
-                    "Read this wiki node with openviking_multi_read. It summarizes a "
-                    "topic and will include source reference URIs for exact fact verification."
+                    "Read this wiki node with openviking_multi_read when a synthesized "
+                    "topic overview is useful. Verify exact facts against source documents "
+                    "when the question asks for thresholds, counts, IDs, owners, versions, "
+                    "or approved wording."
                 )
             group_items.append(output_item)
         return group_items
@@ -995,9 +998,7 @@ class VikingMultiReadTool(OVFileTool):
     def description(self) -> str:
         return (
             "Read full content from multiple OpenViking resources concurrently. "
-            "Returns complete content for all URIs with no truncation. When reading "
-            "Wiki node documents, also includes source reference URIs that should be "
-            "read for exact facts."
+            "Returns complete content for all URIs with no truncation."
         )
 
     @property
@@ -1062,9 +1063,10 @@ class VikingMultiReadTool(OVFileTool):
                 result_lines.append(f"\n--- START OF {uri} ---")
                 if success:
                     result_lines.append(content)
-                    source_hint = await self._wiki_source_reference_hint(client, uri)
-                    if source_hint:
-                        result_lines.append(source_hint)
+                    if self._wiki_source_reference_hints_enabled():
+                        source_hint = await self._wiki_source_reference_hint(client, uri)
+                        if source_hint:
+                            result_lines.append(source_hint)
                 else:
                     result_lines.append(f"ERROR: {content}")
                 result_lines.append(f"--- END OF {uri} ---")
@@ -1080,6 +1082,14 @@ class VikingMultiReadTool(OVFileTool):
     _WIKI_NODE_DOCUMENT_RE = re.compile(
         r"^viking://wiki/nodes/(?P<node_id>[^/]+)/documents/[^/]+$"
     )
+
+    @staticmethod
+    def _wiki_source_reference_hints_enabled() -> bool:
+        return os.getenv("OPENVIKING_WIKI_SOURCE_REF_HINTS", "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
 
     async def _wiki_source_reference_hint(self, client: Any, uri: str) -> str:
         match = self._WIKI_NODE_DOCUMENT_RE.match(uri)
@@ -1101,7 +1111,7 @@ class VikingMultiReadTool(OVFileTool):
         if not ref_uris:
             return ""
 
-        max_refs = 12
+        max_refs = 5
         refs: list[dict[str, Any]] = []
         for ref_uri in ref_uris[:max_refs]:
             try:
@@ -1130,7 +1140,7 @@ class VikingMultiReadTool(OVFileTool):
             (
                 "The Wiki node above is a synthesized overview. For exact thresholds, "
                 "IDs, owners, versions, counts, approval rules, and customer-facing "
-                "wording, read the relevant source URIs below before answering."
+                "wording, use these source URIs only when they are directly relevant."
             ),
         ]
         for index, ref in enumerate(refs, 1):
