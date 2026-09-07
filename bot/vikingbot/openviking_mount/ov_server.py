@@ -679,6 +679,7 @@ class VikingClient:
         query: str,
         target_uri: str | list[str] | None = None,
         limit: int = 10,
+        level: Optional[List[int]] = None,
         user_id: Optional[str] = None,
         peer_id: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -693,11 +694,13 @@ class VikingClient:
         try:
             if peer_id:
                 target_uri = target_uri or self._current_peer_memory_target_uri(peer_id)
-            result = await client.search(
-                query,
-                target_uri=target_uri,
-                limit=limit,
-            )
+            search_kwargs: Dict[str, Any] = {
+                "target_uri": target_uri,
+                "limit": limit,
+            }
+            if level is not None:
+                search_kwargs["level"] = level
+            result = await client.search(query, **search_kwargs)
         finally:
             if should_close:
                 await client.close()

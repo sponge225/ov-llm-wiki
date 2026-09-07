@@ -1,0 +1,34 @@
+project_name: "Wiki_Benchmark"
+dataset_name: "enterprise_rag_bench_selected_80_search_level_end_to_end_fresh_20260907"
+
+adapter:
+  module: "src.adapters.enterprise_rag_bench_adapter"
+  class_name: "EnterpriseRAGBenchAdapter"
+
+execution:
+  mode: "vikingbot"
+  server_port: 2036
+  max_workers: 2
+  retrieval_topk: 5
+  max_queries: null
+  query_ids: [40, 52, 55, 59, 61, 64, 68, 79]
+  skip_ingestion: true
+  ingest_mode: "directory"
+  build_wiki: false
+  wiki_card_input_mode: "summary"
+  wiki_max_card_input_chars: 20000
+  retrieval_instruction: ""
+
+paths:
+  dataset_path: "datasets/EnterpriseRAGBenchSelected80/questions_selected_80.jsonl"
+  doc_output_dir: "wiki_storage/enterprise_rag_bench_selected_80/enterprise_rag_bench_selected_80_processed_docs"
+  vector_store: "wiki_storage/enterprise_rag_bench_selected_80_fresh_baseline_20260907/vector_store"
+  output_dir: "Output/{dataset_name}/wiki"
+  log_file: "Output/{dataset_name}/wiki/benchmark.log"
+
+llm:
+  model: "${OV_VLM_MODEL}"
+  provider: "${OV_VLM_PROVIDER}"
+  temperature: 0
+  base_url: "${OV_VLM_API_BASE}"
+  api_key_env_var: "OV_VLM_API_KEY"

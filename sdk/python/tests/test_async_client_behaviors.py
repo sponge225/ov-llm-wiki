@@ -560,7 +560,13 @@ async def test_search_uses_session_wrapper_session_id_in_payload():
     client._handle_response_data = lambda _response: {"result": {"total": 0, "resources": []}}
 
     session = Session(client, "thread-123")
-    await client.search(query="sample", target_uri="/resources/demo", session=session, limit=5)
+    await client.search(
+        query="sample",
+        target_uri="/resources/demo",
+        session=session,
+        limit=5,
+        level=[2],
+    )
 
     fake_http.post.assert_awaited_once_with(
         "/api/v1/search/search",
@@ -570,6 +576,7 @@ async def test_search_uses_session_wrapper_session_id_in_payload():
             "session_id": "thread-123",
             "limit": 5,
             "telemetry": False,
+            "level": [2],
         },
     )
 

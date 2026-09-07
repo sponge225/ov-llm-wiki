@@ -280,6 +280,30 @@ async def test_viking_client_search_preserves_serialized_group_results(monkeypat
     assert [item["uri"] for item in result["skills"]] == ["viking://user/default/skills/planner.md"]
 
 
+@pytest.mark.asyncio
+async def test_viking_client_search_forwards_level(monkeypatch):
+    monkeypatch.setattr(ov_server_module, "load_config", lambda: _make_config("user"))
+    client = VikingClient()
+    calls = []
+
+    async def _search(query, **kwargs):
+        calls.append({"query": query, **kwargs})
+        return {"memories": [], "resources": [], "skills": [], "total": 0}
+
+    monkeypatch.setattr(client.client, "search", _search)
+
+    await client.search("BYOK", target_uri="viking://resources/", limit=5, level=[2])
+
+    assert calls == [
+        {
+            "query": "BYOK",
+            "target_uri": "viking://resources/",
+            "limit": 5,
+            "level": [2],
+        }
+    ]
+
+
 def test_ov_server_api_key_mode_does_not_read_ovcli_user_key():
     bot_data = {"root_api_key": "bot-root-key"}
     ov_data = {"root_api_key": "server-root-key"}

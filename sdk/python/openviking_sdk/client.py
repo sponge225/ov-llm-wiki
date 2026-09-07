@@ -1155,6 +1155,7 @@ class AsyncHTTPClient:
         context_type: Optional[Any] = None,
         tags: Optional[List[str]] = None,
         telemetry: Any = False,
+        level: Optional[List[int]] = None,
         image: Any = None,
     ) -> Dict[str, Any]:
         actual_limit = node_limit if node_limit is not None else limit
@@ -1170,6 +1171,7 @@ class AsyncHTTPClient:
             "context_type": self._normalize_context_type(context_type),
             "tags": tags,
             "telemetry": telemetry,
+            "level": level,
         }
         payload = self._compact_request_body(payload)
         response = await self._request("POST", "/api/v1/search/search", json=payload)
@@ -2138,6 +2140,7 @@ class SyncHTTPClient:
         context_type: Optional[Any] = None,
         tags: Optional[List[str]] = None,
         telemetry: Any = False,
+        level: Optional[List[int]] = None,
         image: Any = None,
     ) -> Dict[str, Any]:
         actual_session_id = session_id
@@ -2155,6 +2158,7 @@ class SyncHTTPClient:
                 context_type=context_type,
                 tags=tags,
                 telemetry=telemetry,
+                level=level,
                 image=image,
             )
         )

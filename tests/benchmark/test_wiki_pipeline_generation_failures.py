@@ -54,6 +54,28 @@ def _vikingbot_result(answer, total_time_sec=600, token_usage=None, session_id="
     }
 
 
+def test_prepare_tasks_filters_selected_query_ids(tmp_path):
+    class Adapter:
+        pass
+
+    pipe = _make_pipeline(tmp_path, adapter=Adapter())
+    pipe.config["execution"]["query_ids"] = [1, 3]
+    samples = [
+        SimpleNamespace(
+            sample_id="sample",
+            qa_pairs=[
+                SimpleNamespace(question=f"q-{index}", gold_answers=["a"], category="cat", evidence=[])
+                for index in range(5)
+            ],
+        )
+    ]
+
+    tasks = pipe._prepare_tasks(samples)
+
+    assert [task["id"] for task in tasks] == [1, 3]
+    assert [task["qa"].question for task in tasks] == ["q-1", "q-3"]
+
+
 def test_generation_writes_failed_vikingbot_records_without_aborting(tmp_path, monkeypatch):
     class Adapter:
         def load_and_transform(self):
