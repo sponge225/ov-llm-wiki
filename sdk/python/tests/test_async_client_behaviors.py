@@ -184,6 +184,40 @@ def test_sync_http_client_reindex_forwards_to_async_client():
     )
 
 
+def test_sync_http_client_find_forwards_level():
+    client = SyncHTTPClient(url="http://localhost:1933")
+    with patch.object(
+        client._async_client,
+        "find",
+        new_callable=Mock,
+        return_value={"resources": []},
+    ) as mock_find:
+        with patch(
+            "openviking_sdk.client.run_async",
+            return_value={"resources": []},
+        ):
+            client.find(query="sample", level=[2])
+
+    assert mock_find.call_args.kwargs["level"] == [2]
+
+
+def test_sync_http_client_search_forwards_level():
+    client = SyncHTTPClient(url="http://localhost:1933")
+    with patch.object(
+        client._async_client,
+        "search",
+        new_callable=Mock,
+        return_value={"resources": []},
+    ) as mock_search:
+        with patch(
+            "openviking_sdk.client.run_async",
+            return_value={"resources": []},
+        ):
+            client.search(query="sample", level=[2])
+
+    assert mock_search.call_args.kwargs["level"] == [2]
+
+
 def test_sync_http_client_batch_add_messages_forwards_to_async_client():
     client = SyncHTTPClient(url="http://localhost:1933")
     messages = [
@@ -535,6 +569,7 @@ async def test_find_uses_node_limit_as_http_limit_and_normalizes_target_uri_list
         context_type="resource",
         tags=["k:v"],
         telemetry={"enabled": True},
+        level=[2],
     )
 
     fake_http.post.assert_awaited_once_with(
@@ -548,6 +583,7 @@ async def test_find_uses_node_limit_as_http_limit_and_normalizes_target_uri_list
             "context_type": "resource",
             "tags": ["k:v"],
             "telemetry": {"enabled": True},
+            "level": [2],
         },
     )
 
@@ -560,7 +596,13 @@ async def test_search_uses_session_wrapper_session_id_in_payload():
     client._handle_response_data = lambda _response: {"result": {"total": 0, "resources": []}}
 
     session = Session(client, "thread-123")
-    await client.search(query="sample", target_uri="/resources/demo", session=session, limit=5)
+    await client.search(
+        query="sample",
+        target_uri="/resources/demo",
+        session=session,
+        limit=5,
+        level=[2],
+    )
 
     fake_http.post.assert_awaited_once_with(
         "/api/v1/search/search",
@@ -570,6 +612,7 @@ async def test_search_uses_session_wrapper_session_id_in_payload():
             "session_id": "thread-123",
             "limit": 5,
             "telemetry": False,
+            "level": [2],
         },
     )
 

@@ -474,3 +474,66 @@ async def test_search_with_peer_id_uses_peer_target_uri_without_forwarding_peer_
             "limit": 3,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_search_forwards_level():
+    client = _client(api_key_type="user")
+    calls = []
+
+    class FakeResult:
+        memories = []
+        resources = []
+        skills = []
+
+    class FakeHTTPClient:
+        async def search(self, query, **kwargs):
+            calls.append({"query": query, **kwargs})
+            return FakeResult()
+
+    client.client = FakeHTTPClient()
+
+    await client.search(
+        "hello",
+        target_uri="viking://resources/",
+        limit=3,
+        level=[2],
+    )
+
+    assert calls == [
+        {
+            "query": "hello",
+            "target_uri": "viking://resources/",
+            "limit": 3,
+            "level": [2],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_find_forwards_level():
+    client = _client(api_key_type="user")
+    calls = []
+
+    class FakeHTTPClient:
+        async def find(self, query, **kwargs):
+            calls.append({"query": query, **kwargs})
+            return {"resources": []}
+
+    client.client = FakeHTTPClient()
+
+    await client.find(
+        "hello",
+        target_uri="viking://resources/",
+        limit=3,
+        level=[2],
+    )
+
+    assert calls == [
+        {
+            "query": "hello",
+            "target_uri": "viking://resources/",
+            "limit": 3,
+            "level": [2],
+        }
+    ]
