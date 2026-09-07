@@ -352,18 +352,13 @@ class BenchmarkPipeline:
         tasks = []
         global_idx = 0
         max_queries = self.config['execution'].get('max_queries')
-        query_ids = self.config['execution'].get('query_ids')
-        selected_query_ids = set(query_ids) if query_ids is not None else None
         for sample in samples:
             for qa in sample.qa_pairs:
-                if selected_query_ids is not None and global_idx not in selected_query_ids:
-                    global_idx += 1
-                    continue
-                if max_queries is not None and len(tasks) >= max_queries:
+                if max_queries is not None and global_idx >= max_queries:
                     break
                 tasks.append({"id": global_idx, "sample_id": sample.sample_id, "qa": qa})
                 global_idx += 1
-            if max_queries is not None and len(tasks) >= max_queries:
+            if max_queries is not None and global_idx >= max_queries:
                 break
         return tasks
 
