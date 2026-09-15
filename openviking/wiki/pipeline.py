@@ -5,8 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import asdict
+from typing import Any
+
+from openviking.utils.token_estimation import estimate_text_tokens
 
 from .assignments import SourceRefBuilder
+from .card_store import DocumentCardStore
 from .cards import DocumentCardGenerator
 from .config import WikiConfig
 from .content_loader import WikiCardInputMode, WikiContentLoader
@@ -24,9 +28,9 @@ from .schemas import (
     WikiNode,
     WikiResourceInput,
 )
+from .source_selector import NodeSourceSelector
 from .uri import (
-    card_json_uri,
-    card_md_uri,
+    card_run_dir,
     node_card_json_uri,
     node_card_md_uri,
     node_document_uri,
@@ -69,7 +73,16 @@ class WikiPipeline:
         )
         self.node_discovery = NodeDiscoveryRunner(self.llm, self.config)
         self.source_ref_builder = SourceRefBuilder(self.config)
-        self.content_generator = NodeContentGenerator(self.llm)
+        self.content_generator = NodeContentGenerator(
+            self.llm,
+            max_prompt_tokens=self.config.limits.max_node_prompt_tokens,
+            max_document_tokens=self.config.limits.max_node_document_tokens,
+        )
+        self.source_selector = NodeSourceSelector(
+            self.writer.viking_fs,
+            self.writer.ctx,
+            self.config.limits,
+        )
         self.layer_decision_runner = LayerDecisionRunner(self.llm)
 
     def get_token_usage(self) -> dict[str, Any]:
@@ -83,11 +96,32 @@ class WikiPipeline:
         card_input_mode: WikiCardInputMode | str = WikiCardInputMode.SUMMARY,
         max_card_input_chars: int = 20000,
     ) -> PipelineArtifacts:
-        if not docs:
-            raise ValueError("Wiki pipeline requires at least one resource document")
+        """Compatibility helper that executes the two explicit stages."""
+        resource_uris = [self.config.resource_root_uri.rstrip("/") + "/"]
+        await self.generate_document_cards_from_inputs(
+            docs,
+            content_loader=content_loader,
+            resource_uris=resource_uris,
+            card_input_mode=card_input_mode,
+            max_card_input_chars=max_card_input_chars,
+        )
+        return await self.run_from_stored_cards(
+            docs,
+            content_loader=content_loader,
+            resource_uris=resource_uris,
+        )
 
-        artifacts = PipelineArtifacts()
-        await self.writer.ensure_dirs()
+    async def generate_document_cards_from_inputs(
+        self,
+        docs: list[WikiResourceInput],
+        *,
+        content_loader: WikiContentLoader,
+        resource_uris: list[str],
+        card_input_mode: WikiCardInputMode | str = WikiCardInputMode.SUMMARY,
+        max_card_input_chars: int = 20000,
+    ) -> tuple[list[DocumentCard], Any]:
+        if not docs:
+            raise ValueError("Document Card generation requires at least one resource document")
 
         logger.info(
             "[Wiki] Generating document cards for %d docs from %s inputs",
@@ -96,44 +130,104 @@ class WikiPipeline:
         )
 
         input_mode = WikiCardInputMode(card_input_mode)
-        max_concurrent = max(1, self.config.limits.max_concurrent_cards)
-        sem = asyncio.Semaphore(max_concurrent)
-
-        async def _load_documents(mode: WikiCardInputMode) -> list[ResourceDocument]:
-            results: list[ResourceDocument | None] = [None] * len(docs)
-
-            async def _load_one(index: int, doc: WikiResourceInput) -> None:
-                async with sem:
-                    results[index] = await content_loader.load_document(
-                        doc,
-                        mode=mode,
-                        max_card_input_chars=max_card_input_chars,
-                    )
-
-            await asyncio.gather(*[_load_one(index, doc) for index, doc in enumerate(docs)])
-            if any(result is None for result in results):
-                raise RuntimeError("resource document loading did not produce all documents")
-            return [result for result in results if result is not None]
-
-        resource_docs = await _load_documents(input_mode)
-        source_docs_task = (
-            None
-            if input_mode == WikiCardInputMode.RAW_CHUNK
-            else asyncio.create_task(_load_documents(WikiCardInputMode.RAW_CHUNK))
+        resource_docs = await self._load_documents(
+            docs,
+            content_loader=content_loader,
+            mode=input_mode,
+            max_card_input_chars=max_card_input_chars,
         )
-        try:
-            cards = await self.card_generator.generate(resource_docs)
-        except Exception:
-            if source_docs_task is not None:
-                source_docs_task.cancel()
-                await asyncio.gather(source_docs_task, return_exceptions=True)
-            raise
-        source_docs = resource_docs if source_docs_task is None else await source_docs_task
+        cards = await self.card_generator.generate(resource_docs)
+        manifest = await self._card_store().replace(
+            cards=cards,
+            resource_documents=resource_docs,
+            resource_uris=resource_uris,
+            card_input_mode=input_mode.value,
+            max_card_input_chars=max_card_input_chars,
+            model_provenance=_redact_sensitive_config(self.config.vlm_config or {}),
+        )
+        await self._write_card_run_records()
         logger.info("[Wiki] Generated %d document cards", len(cards))
+        return cards, manifest
+
+    async def run_from_stored_cards(
+        self,
+        docs: list[WikiResourceInput],
+        *,
+        content_loader: WikiContentLoader,
+        resource_uris: list[str],
+    ) -> PipelineArtifacts:
+        if not docs:
+            raise ValueError("Wiki pipeline requires at least one resource document")
+
+        card_store = self._card_store()
+        manifest = await card_store.read_manifest()
+        input_mode = WikiCardInputMode(manifest.card_input_mode)
+        card_input_docs = await self._load_documents(
+            docs,
+            content_loader=content_loader,
+            mode=input_mode,
+            max_card_input_chars=manifest.max_card_input_chars,
+        )
+        cards = await card_store.load_validated(
+            manifest=manifest,
+            resource_documents=card_input_docs,
+            resource_uris=resource_uris,
+        )
+        source_docs = await self._load_source_documents(docs, content_loader)
         return await self._run_from_cards(
             cards,
-            artifacts,
+            PipelineArtifacts(),
             {doc.doc_id: doc for doc in source_docs},
+        )
+
+    async def _load_documents(
+        self,
+        docs: list[WikiResourceInput],
+        *,
+        content_loader: WikiContentLoader,
+        mode: WikiCardInputMode,
+        max_card_input_chars: int,
+    ) -> list[ResourceDocument]:
+        max_concurrent = max(1, self.config.limits.max_concurrent_cards)
+        sem = asyncio.Semaphore(max_concurrent)
+        results: list[ResourceDocument | None] = [None] * len(docs)
+
+        async def _load_one(index: int, doc: WikiResourceInput) -> None:
+            async with sem:
+                results[index] = await content_loader.load_document(
+                    doc,
+                    mode=mode,
+                    max_card_input_chars=max_card_input_chars,
+                )
+
+        await asyncio.gather(*[_load_one(index, doc) for index, doc in enumerate(docs)])
+        if any(result is None for result in results):
+            raise RuntimeError("resource document loading did not produce all documents")
+        return [result for result in results if result is not None]
+
+    async def _load_source_documents(
+        self,
+        docs: list[WikiResourceInput],
+        content_loader: WikiContentLoader,
+    ) -> list[ResourceDocument]:
+        semaphore = asyncio.Semaphore(max(1, self.config.limits.max_concurrent_cards))
+        results: list[ResourceDocument | None] = [None] * len(docs)
+
+        async def load_one(index: int, doc: WikiResourceInput) -> None:
+            async with semaphore:
+                results[index] = await content_loader.load_source_document(doc)
+
+        await asyncio.gather(*(load_one(index, doc) for index, doc in enumerate(docs)))
+        if any(document is None for document in results):
+            raise RuntimeError("source document loading did not produce all documents")
+        return [document for document in results if document is not None]
+
+    def _card_store(self) -> DocumentCardStore:
+        return DocumentCardStore(
+            viking_fs=self.writer.viking_fs,
+            writer=self.writer,
+            config=self.config,
+            ctx=self.writer.ctx,
         )
 
     async def _run_from_cards(
@@ -145,7 +239,7 @@ class WikiPipeline:
         all_cards: list[DocumentCard] = list(cards)
         source_documents_by_id = dict(resource_documents_by_id)
         artifacts.cards = all_cards
-        await self._write_cards(cards)
+        await self.writer.ensure_wiki_dirs()
 
         all_nodes: list[WikiNode] = []
         all_source_refs_by_node: dict[str, list[SourceRef]] = {}
@@ -158,7 +252,9 @@ class WikiPipeline:
             source_cards = cards if depth == 1 else previous_layer_cards
             if depth == 1:
                 min_sources = self.config.limits.min_refs_per_node
-                logger.info("[Wiki] Discovering bottom-layer nodes from %d card topics", len(source_cards))
+                logger.info(
+                    "[Wiki] Discovering bottom-layer nodes from %d card topics", len(source_cards)
+                )
             else:
                 min_sources = self.config.limits.min_child_nodes_per_parent
                 logger.info(
@@ -215,7 +311,9 @@ class WikiPipeline:
                 if depth == 1:
                     raise RuntimeError("bottom layer produced no supported active nodes")
                 break
-            logger.info("[Wiki] Depth=%d retained %d supported active nodes", depth, len(active_nodes))
+            logger.info(
+                "[Wiki] Depth=%d retained %d supported active nodes", depth, len(active_nodes)
+            )
 
             if depth > 1:
                 all_nodes = _assign_parent_node_links(all_nodes, active_nodes)
@@ -223,7 +321,9 @@ class WikiPipeline:
             all_nodes.extend(layer_nodes)
             reserved_node_ids.update(node.node_id for node in layer_nodes)
             artifacts.nodes = all_nodes
-            await self.writer.write_json(f"{wiki_root(self.config)}nodes.json", {"nodes": all_nodes})
+            await self.writer.write_json(
+                f"{wiki_root(self.config)}nodes.json", {"nodes": all_nodes}
+            )
 
             all_source_refs_by_node.update(assignment_result.source_refs_by_node)
             all_unassigned_source_ids.extend(assignment_result.unassigned_source_ids)
@@ -240,6 +340,7 @@ class WikiPipeline:
                 active_nodes,
                 assignment_result,
                 source_documents_by_id,
+                {card.doc_id: card for card in source_cards},
                 depth=depth,
             )
             all_contexts.extend(layer_contexts)
@@ -287,6 +388,7 @@ class WikiPipeline:
         active_nodes: list[WikiNode],
         assignment_result: SourceAssignmentResult,
         source_documents_by_id: dict[str, ResourceDocument],
+        source_cards_by_id: dict[str, DocumentCard],
         *,
         depth: int,
     ) -> list[GeneratedNodeContext]:
@@ -303,14 +405,26 @@ class WikiPipeline:
         async def _generate_one(index: int, node: WikiNode) -> None:
             async with sem:
                 logger.info("[Wiki] Depth=%d generating node context: %s", depth, node.node_id)
-                contexts[index] = await self._generate_node_context(
-                    node,
-                    assignment_result,
-                    source_documents_by_id,
-                )
+                try:
+                    contexts[index] = await self._generate_node_context(
+                        node,
+                        assignment_result,
+                        source_documents_by_id,
+                        source_cards_by_id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "[Wiki] Node context generation failed: depth=%d node_id=%s title=%r",
+                        depth,
+                        node.node_id,
+                        node.title,
+                    )
+                    raise
                 logger.info("[Wiki] Depth=%d generated node context: %s", depth, node.node_id)
 
-        await asyncio.gather(*[_generate_one(index, node) for index, node in enumerate(active_nodes)])
+        await asyncio.gather(
+            *[_generate_one(index, node) for index, node in enumerate(active_nodes)]
+        )
         if any(context is None for context in contexts):
             raise RuntimeError("node context generation did not produce all contexts")
         return [context for context in contexts if context is not None]
@@ -320,27 +434,43 @@ class WikiPipeline:
         node: WikiNode,
         assignment_result: SourceAssignmentResult,
         source_documents_by_id: dict[str, ResourceDocument],
+        source_cards_by_id: dict[str, DocumentCard],
     ) -> GeneratedNodeContext:
         source_refs = assignment_result.source_refs_by_node.get(node.node_id)
         if not source_refs:
             raise RuntimeError(f"active node {node.node_id} has no source refs")
 
-        await self.writer.ensure_dirs([node.node_id])
+        await self.writer.ensure_wiki_dirs([node.node_id])
         await self._write_source_refs(node, source_refs)
 
         source_documents = _source_documents_for_refs(source_refs, source_documents_by_id)
-        documents = await self.content_generator.generate_node_documents(
-            node,
-            source_documents,
-        )
-        for document in documents:
-            await self.writer.write_text(
-                node_document_uri(self.config, node.node_id, document.document_id),
-                document.content,
+        if node.depth > 1:
+            document = await self.content_generator.generate_direct(node, source_documents)
+        else:
+            source_tokens = sum(
+                estimate_text_tokens(section["content"])
+                for source_document in source_documents
+                for section in source_document["sections"]
             )
+            if source_tokens <= self.config.limits.large_node_source_token_threshold:
+                document = await self.content_generator.generate_direct(node, source_documents)
+            else:
+                source_cards = [source_cards_by_id[source_ref.doc_id] for source_ref in source_refs]
+                outline = await self.content_generator.generate_outline(node, source_cards)
+                selected_sources = await self.source_selector.select(
+                    node, source_refs, source_documents_by_id
+                )
+                document = await self.content_generator.generate_staged(
+                    node, outline, selected_sources
+                )
+
+        await self.writer.write_text(
+            node_document_uri(self.config, node.node_id),
+            document.content,
+        )
         card = await self.card_generator.generate_node_card(
             node,
-            documents,
+            document,
             resource_uri=node_root_uri(self.config, node.node_id),
         )
         await self._write_node_card(node, card)
@@ -348,15 +478,10 @@ class WikiPipeline:
         context = GeneratedNodeContext(
             node=node,
             card=card,
-            documents=documents,
+            document=document,
             source_refs=source_refs,
         )
         return context
-
-    async def _write_cards(self, cards: list[DocumentCard]) -> None:
-        for card in cards:
-            await self.writer.write_text(card_md_uri(self.config, card.doc_id), card.markdown)
-            await self.writer.write_json(card_json_uri(self.config, card.doc_id), card)
 
     async def _write_node_card(self, node: WikiNode, card: DocumentCard) -> None:
         await self.writer.write_text(node_card_md_uri(self.config, node.node_id), card.markdown)
@@ -384,6 +509,21 @@ class WikiPipeline:
             "# Wiki Run Logs\n\nGeneration completed without pipeline-level errors.\n",
         )
 
+    async def _write_card_run_records(self) -> None:
+        run_root = card_run_dir(self.config)
+        run_config = {
+            "pipeline_version": self.config.pipeline_version,
+            "model_config": _redact_sensitive_config(self.config.vlm_config or {}),
+            "limits": asdict(self.config.limits),
+        }
+        await self.writer.write_json(f"{run_root}config.json", run_config)
+        await self.writer.write_jsonl(f"{run_root}prompts.jsonl", self.llm.log.prompts)
+        await self.writer.write_jsonl(f"{run_root}raw_outputs.jsonl", self.llm.log.raw_outputs)
+        await self.writer.write_text(
+            f"{run_root}logs.md",
+            "# Document Card Run Logs\n\nGeneration completed without pipeline-level errors.\n",
+        )
+
 
 def _source_documents_for_refs(
     source_refs: list[SourceRef],
@@ -393,15 +533,17 @@ def _source_documents_for_refs(
     for source_ref in source_refs:
         resource_document = source_documents_by_id.get(source_ref.doc_id)
         if not resource_document:
-            raise RuntimeError(f"node source ref has no loaded source document: {source_ref.doc_id}")
+            raise RuntimeError(
+                f"node source ref has no loaded source document: {source_ref.doc_id}"
+            )
         if not resource_document.source_sections:
             raise RuntimeError(f"node source ref has no source sections: {source_ref.doc_id}")
         source_documents.append(
             {
                 "source_id": source_ref.doc_id,
+                "title": source_ref.title,
                 "sections": [
-                    section.model_dump(mode="json")
-                    for section in resource_document.source_sections
+                    section.model_dump(mode="json") for section in resource_document.source_sections
                 ],
             }
         )
@@ -411,7 +553,9 @@ def _source_documents_for_refs(
 def _redact_sensitive_config(value: object) -> object:
     if isinstance(value, dict):
         return {
-            key: "***REDACTED***" if str(key).lower() in _SENSITIVE_CONFIG_KEYS else _redact_sensitive_config(item)
+            key: "***REDACTED***"
+            if str(key).lower() in _SENSITIVE_CONFIG_KEYS
+            else _redact_sensitive_config(item)
             for key, item in value.items()
         }
     if isinstance(value, list):
@@ -447,11 +591,7 @@ def _reject_nodes_with_insufficient_refs(
     if not unsupported_node_ids and not is_parent_layer:
         return layer_nodes, active_nodes, assignment_result
 
-    supported_node_ids = {
-        node.node_id
-        for node in updated_layer_nodes
-        if node.status == "active"
-    }
+    supported_node_ids = {node.node_id for node in updated_layer_nodes if node.status == "active"}
     filtered_assignment_result = assignment_result.model_copy(
         update={
             "source_refs_by_node": {
@@ -499,7 +639,9 @@ def _assign_parent_node_links(
             continue
         updated_nodes.append(
             node.model_copy(
-                update={"parent_node_ids": list(dict.fromkeys([*node.parent_node_ids, *parent_ids]))}
+                update={
+                    "parent_node_ids": list(dict.fromkeys([*node.parent_node_ids, *parent_ids]))
+                }
             )
         )
     return updated_nodes
@@ -513,13 +655,12 @@ def _resource_document_for_node(
         doc_id=context.node.node_id,
         resource_uri=node_root_uri(config, context.node.node_id),
         title=context.node.title,
-        content_or_structure="\n\n".join(document.content for document in context.documents),
+        content_or_structure=context.document.content,
         source_sections=[
             {
-                "section_uri": node_document_uri(config, context.node.node_id, document.document_id),
-                "content": document.content,
+                "section_uri": node_document_uri(config, context.node.node_id),
+                "content": context.document.content,
             }
-            for document in context.documents
         ],
         metadata={"source_type": "wiki_node"},
     )

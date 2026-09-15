@@ -112,10 +112,16 @@ class UnimplementedError(OpenVikingError):
 
 
 class ProcessingError(OpenVikingError):
-    def __init__(self, message: str, source: Optional[str] = None):
-        super().__init__(
-            message, code="PROCESSING_ERROR", details={"source": source} if source else {}
-        )
+    def __init__(
+        self,
+        message: str,
+        source: Optional[str] = None,
+        details: Optional[dict] = None,
+    ):
+        error_details = dict(details or {})
+        if source:
+            error_details.setdefault("source", source)
+        super().__init__(message, code="PROCESSING_ERROR", details=error_details)
 
 
 class EmbeddingFailedError(ProcessingError):

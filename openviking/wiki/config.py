@@ -18,6 +18,18 @@ class WikiGenerationLimits:
     max_concurrent_cards: int = 10
     # 同时发起多少个节点内容生成请求。
     max_concurrent_nodes: int = 10
+    # 仅原始文档来源超过该 token 数时启用 scope-guided 分阶段生成。
+    large_node_source_token_threshold: int = 90000
+    # 单次节点正文模型调用允许的最大输入 token 数。
+    max_node_prompt_tokens: int = 96000
+    # 最终节点正文允许的最大 token 数。
+    max_node_document_tokens: int = 16000
+    # 每篇原始来源最多保留的 scope 检索结果数。
+    node_source_retrieval_limit: int = 20
+    # scope 检索最低分数；None 表示只应用 top-k。
+    node_source_score_threshold: float | None = None
+    # 单个节点内并行检索多少篇原始来源。
+    node_source_retrieval_concurrency: int = 8
 
 
 @dataclass

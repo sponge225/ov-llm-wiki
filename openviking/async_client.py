@@ -371,7 +371,7 @@ class AsyncOpenViking:
             **kwargs,
         )
 
-    async def build_wiki(
+    async def build_wiki_cards(
         self,
         resource_uris: List[str],
         wiki_root_uri: str = "viking://wiki/",
@@ -379,9 +379,9 @@ class AsyncOpenViking:
         max_card_input_chars: int = 20000,
         telemetry: TelemetryRequest = False,
     ) -> Dict[str, Any]:
-        """Build Wiki from existing resources."""
+        """Build reusable Document Cards from existing resources."""
         await self._ensure_initialized()
-        return await self._client.build_wiki(
+        return await self._client.build_wiki_cards(
             resource_uris=resource_uris,
             wiki_root_uri=wiki_root_uri,
             card_input_mode=card_input_mode,
@@ -389,15 +389,31 @@ class AsyncOpenViking:
             telemetry=telemetry,
         )
 
+    async def build_wiki(
+        self,
+        resource_uris: List[str],
+        wiki_root_uri: str = "viking://wiki/",
+        telemetry: TelemetryRequest = False,
+    ) -> Dict[str, Any]:
+        """Build Wiki nodes from reusable Document Cards."""
+        await self._ensure_initialized()
+        return await self._client.build_wiki(
+            resource_uris=resource_uris,
+            wiki_root_uri=wiki_root_uri,
+            telemetry=telemetry,
+        )
+
     async def clear_wiki(
         self,
         wiki_root_uri: str = "viking://wiki/",
+        preserve_cards: bool = False,
         telemetry: TelemetryRequest = False,
     ) -> Dict[str, Any]:
         """Clear generated Wiki assets."""
         await self._ensure_initialized()
         return await self._client.clear_wiki(
             wiki_root_uri=wiki_root_uri,
+            preserve_cards=preserve_cards,
             telemetry=telemetry,
         )
 

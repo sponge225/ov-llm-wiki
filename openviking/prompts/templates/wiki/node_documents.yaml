@@ -11,12 +11,17 @@ variables:
     type: "string"
     description: "JSON encoded node and source sections"
     required: true
+  - name: "max_document_tokens"
+    type: "int"
+    description: "Maximum estimated output tokens"
+    required: true
+    default: 16000
 
 template: |
-  Generate Wiki documents for the given Wiki node.
+  Generate one Wiki document for the given Wiki node.
 
   Task:
-  - Write the synthesized Markdown content for this Wiki node. Use one document by default; split into multiple documents only to keep each document readable when the content is long.
+  - Write one complete synthesized Markdown document for this Wiki node.
   - Use only the section text provided in the input source documents.
   - Use the node title and scope as the topic boundary: include content inside this boundary, and exclude related but out-of-scope content.
   - A source document may be an original resource document or a generated lower-layer Wiki node document.
@@ -33,7 +38,10 @@ template: |
   {{ input_json }}
 
   Output requirements:
-  - documents: Markdown content for the Wiki node.
+  - markdown: the complete Markdown document.
+  - The first line must be exactly the H1 heading "# <node.title>".
+  - Include at least one H2 heading.
+  - Keep the complete Markdown within {{ max_document_tokens }} tokens.
   - The document must read like a new Wiki-level synthesis, not a sequence of per-source summaries.
 
   Return only JSON matching the schema.

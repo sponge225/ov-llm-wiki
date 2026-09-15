@@ -91,6 +91,7 @@ def _raise_legacy_exception(error: Dict[str, Any]) -> None:
         ResourceExhaustedError,
         AbortedError,
         UnimplementedError,
+        ProcessingError,
     ):
         raise exc_class(message, details=details)
     if exc_class == InvalidURIError:

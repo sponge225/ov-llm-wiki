@@ -18,6 +18,7 @@ from .content_loader import WikiContentLoader
 from .document_manifest import load_document_manifest, wiki_inputs_from_manifest
 from .pipeline import WikiPipeline
 from .schemas import WikiResourceInput
+from .uri import card_manifest_uri, nodes_dir, run_dir, wiki_root
 from .writer import WikiVikingFSWriter
 
 
@@ -36,7 +37,7 @@ class WikiService:
         self._vikingdb = vikingdb
         self._viking_fs = viking_fs
 
-    async def build_wiki(
+    async def build_wiki_cards(
         self,
         *,
         resource_uris: list[str],
@@ -54,7 +55,109 @@ class WikiService:
 
         normalized_resource_uris = await self._normalize_resource_uris(resource_uris, ctx)
         wiki_inputs = await self._wiki_resource_inputs_from_uris(normalized_resource_uris, ctx)
+        pipeline, loader, wiki_config = self._create_pipeline(
+            normalized_resource_uris,
+            wiki_root_uri,
+            ctx,
+        )
+        cards, manifest = await pipeline.generate_document_cards_from_inputs(
+            wiki_inputs,
+            content_loader=loader,
+            resource_uris=normalized_resource_uris,
+            card_input_mode=card_input_mode,
+            max_card_input_chars=max_card_input_chars,
+        )
+        return {
+            "status": "success",
+            "docs": len(wiki_inputs),
+            "cards": len(cards),
+            "card_input_mode": card_input_mode,
+            "wiki_root_uri": wiki_root_uri,
+            "card_manifest_uri": card_manifest_uri(wiki_config),
+            "resource_uris": normalized_resource_uris,
+            "token_usage": pipeline.get_token_usage(),
+            "manifest": manifest.model_dump(mode="json"),
+        }
 
+    async def build_wiki(
+        self,
+        *,
+        resource_uris: list[str],
+        ctx: RequestContext,
+        wiki_root_uri: str = "viking://wiki/",
+    ) -> dict[str, Any]:
+        self._ensure_initialized()
+        self._validate_wiki_root_uri(wiki_root_uri)
+
+        normalized_resource_uris = await self._normalize_resource_uris(resource_uris, ctx)
+        wiki_inputs = await self._wiki_resource_inputs_from_uris(normalized_resource_uris, ctx)
+        pipeline, loader, wiki_config = self._create_pipeline(
+            normalized_resource_uris,
+            wiki_root_uri,
+            ctx,
+        )
+        artifacts = await pipeline.run_from_stored_cards(
+            wiki_inputs,
+            content_loader=loader,
+            resource_uris=normalized_resource_uris,
+        )
+        return {
+            "status": "success",
+            "docs": len(wiki_inputs),
+            "cards": len([card for card in artifacts.cards if card.resource_uri.startswith("viking://resources/")]),
+            "cards_reused": True,
+            "card_manifest_uri": card_manifest_uri(wiki_config),
+            "nodes": len(artifacts.nodes),
+            "node_contexts": len(artifacts.node_contexts),
+            "wiki_root_uri": wiki_root_uri,
+            "resource_uris": normalized_resource_uris,
+            "token_usage": pipeline.get_token_usage(),
+        }
+
+    async def clear_wiki(
+        self,
+        *,
+        ctx: RequestContext,
+        wiki_root_uri: str = "viking://wiki/",
+        preserve_cards: bool = False,
+    ) -> dict[str, Any]:
+        self._ensure_initialized()
+        self._validate_wiki_root_uri(wiki_root_uri)
+        assert self._viking_fs is not None
+        wiki_config = WikiConfig(wiki_root_uri=wiki_root_uri)
+        if not preserve_cards:
+            missing = not await self._viking_fs.exists(wiki_root_uri, ctx=ctx)
+            await self._viking_fs.rm(wiki_root_uri, recursive=True, ctx=ctx)
+            removed_paths = [] if missing else [wiki_root(wiki_config)]
+        else:
+            targets = [
+                (nodes_dir(wiki_config), True),
+                (f"{wiki_root(wiki_config)}nodes.json", False),
+                (f"{wiki_root(wiki_config)}source_assignments.json", False),
+                (run_dir(wiki_config), True),
+            ]
+            removed_paths = []
+            for target, recursive in targets:
+                if not await self._viking_fs.exists(target, ctx=ctx):
+                    continue
+                await self._viking_fs.rm(target, recursive=recursive, ctx=ctx)
+                removed_paths.append(target)
+            missing = not removed_paths
+        return {
+            "status": "success",
+            "wiki_root_uri": wiki_root_uri,
+            "cleared": not missing,
+            "missing": missing,
+            "cards_preserved": preserve_cards,
+            "removed_paths": removed_paths,
+        }
+
+    def _create_pipeline(
+        self,
+        normalized_resource_uris: list[str],
+        wiki_root_uri: str,
+        ctx: RequestContext,
+    ) -> tuple[WikiPipeline, WikiContentLoader, WikiConfig]:
         assert self._viking_fs is not None
         assert self._vikingdb is not None
         loader = WikiContentLoader(self._viking_fs, self._vikingdb, ctx)
@@ -71,42 +174,7 @@ class WikiService:
             ctx=ctx,
             config=wiki_config,
         )
-        pipeline = WikiPipeline(writer=writer, config=wiki_config)
-        artifacts = await pipeline.run_from_inputs(
-            wiki_inputs,
-            content_loader=loader,
-            card_input_mode=card_input_mode,
-            max_card_input_chars=max_card_input_chars,
-        )
-        return {
-            "status": "success",
-            "docs": len(wiki_inputs),
-            "cards": len(artifacts.cards),
-            "nodes": len(artifacts.nodes),
-            "node_contexts": len(artifacts.node_contexts),
-            "card_input_mode": card_input_mode,
-            "wiki_root_uri": wiki_root_uri,
-            "resource_uris": normalized_resource_uris,
-            "token_usage": pipeline.get_token_usage(),
-        }
-
-    async def clear_wiki(
-        self,
-        *,
-        ctx: RequestContext,
-        wiki_root_uri: str = "viking://wiki/",
-    ) -> dict[str, Any]:
-        self._ensure_initialized()
-        self._validate_wiki_root_uri(wiki_root_uri)
-        assert self._viking_fs is not None
-        missing = not await self._viking_fs.exists(wiki_root_uri, ctx=ctx)
-        await self._viking_fs.rm(wiki_root_uri, recursive=True, ctx=ctx)
-        return {
-            "status": "success",
-            "wiki_root_uri": wiki_root_uri,
-            "cleared": not missing,
-            "missing": missing,
-        }
+        return WikiPipeline(writer=writer, config=wiki_config), loader, wiki_config
 
     def _ensure_initialized(self) -> None:
         if self._vikingdb is None:

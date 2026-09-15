@@ -169,9 +169,16 @@ class UnimplementedError(OpenVikingError):
 class ProcessingError(OpenVikingError):
     """Error during resource processing."""
 
-    def __init__(self, message: str, source: Optional[str] = None):
-        details = {"source": source} if source else {}
-        super().__init__(message, code="PROCESSING_ERROR", details=details)
+    def __init__(
+        self,
+        message: str,
+        source: Optional[str] = None,
+        details: Optional[dict] = None,
+    ):
+        error_details = dict(details or {})
+        if source:
+            error_details.setdefault("source", source)
+        super().__init__(message, code="PROCESSING_ERROR", details=error_details)
 
 
 class EmbeddingFailedError(ProcessingError):

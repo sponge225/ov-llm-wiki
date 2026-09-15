@@ -53,11 +53,13 @@ NonEmptyStrList = Annotated[list[str], Field(min_length=1)]
 
 class StrictModel(BaseModel):
     """所有 Wiki 数据模型的基类，禁止接收未声明字段。"""
+
     model_config = ConfigDict(extra="forbid")
 
 
 class ResourceDocumentDraft(StrictModel):
     """解析器列出的文档边界条目。"""
+
     doc_id: NonEmptyStr
     title: NonEmptyStr
     relative_uri: str = ""
@@ -65,6 +67,7 @@ class ResourceDocumentDraft(StrictModel):
 
 class WikiResourceInput(StrictModel):
     """入库后传给 Wiki pipeline 的文档入口记录，用来定位资源并加载内容生成 Document Card。"""
+
     doc_id: NonEmptyStr
     resource_uri: ResourceUri
     title: NonEmptyStr
@@ -74,12 +77,14 @@ class WikiResourceInput(StrictModel):
 
 class SourceSection(StrictModel):
     """节点正文生成使用的来源片段。"""
+
     section_uri: NonEmptyStr
     content: NonEmptyStr
 
 
 class ResourceDocument(StrictModel):
     """已加载好内容的资源文档，是生成 Document Card 时传给 LLM 的输入。"""
+
     doc_id: NonEmptyStr
     resource_uri: SourceUri
     title: NonEmptyStr
@@ -90,6 +95,7 @@ class ResourceDocument(StrictModel):
 
 class DocumentCardContent(StrictModel):
     """LLM 为单篇文档提炼的语义卡片内容，不包含系统已知的文档标识字段。"""
+
     summary: NonEmptyStr
     main_points: NonEmptyStrList
     important_terms: list[str] = Field(default_factory=list)
@@ -98,14 +104,42 @@ class DocumentCardContent(StrictModel):
 
 class DocumentCard(DocumentCardContent):
     """来源文档或 Wiki 节点的结构化卡片，是后续节点发现和来源分配的基础输入。"""
+
     doc_id: NonEmptyStr
     resource_uri: SourceUri
     title: NonEmptyStr
     markdown: str = ""
 
 
+class DocumentCardManifestEntry(StrictModel):
+    """一张持久化 Document Card 及其生成输入的完整性记录。"""
+
+    doc_id: NonEmptyStr
+    resource_uri: ResourceUri
+    title: NonEmptyStr
+    prompt_hash: NonEmptyStr
+    card_hash: NonEmptyStr
+    card_json_uri: NonEmptyStr
+    card_markdown_uri: NonEmptyStr
+
+
+class DocumentCardManifest(StrictModel):
+    """可复用 Document Cards 的版本与输入指纹。"""
+
+    version: int = Field(ge=1)
+    pipeline_version: NonEmptyStr
+    prompt_version: NonEmptyStr
+    schema_hash: NonEmptyStr
+    card_input_mode: Literal["summary", "raw_chunk"]
+    max_card_input_chars: int = Field(gt=0)
+    resource_uris: list[ResourceUri]
+    model_provenance: dict[str, Any] = Field(default_factory=dict)
+    entries: list[DocumentCardManifestEntry]
+
+
 class WikiNode(StrictModel):
     """Wiki 目录图中的内部节点，保存稳定标识、主题边界和层级关系。"""
+
     node_id: NodeId
     title: NonEmptyStr
     status: Literal["active", "rejected"] = "active"
@@ -117,24 +151,28 @@ class WikiNode(StrictModel):
 
 class WikiNodeDiscoveryItem(StrictModel):
     """模型发现的一个 Wiki 主题，只描述名称和知识边界。"""
+
     title: NonEmptyStr = Field(description="面向读者的 Wiki 节点名称")
     scope: NonEmptyStr = Field(description="节点覆盖的知识范围及明确排除的内容")
 
 
 class WikiSourceNodeDiscoveryItem(WikiNodeDiscoveryItem):
     """来源 card 聚合结果，同时给出支撑该节点的来源 ID。"""
+
     supporting_source_ids: NonEmptyStrList
     merged_candidate_topics: list[str] = Field(default_factory=list)
 
 
 class WikiSourceNodeDiscoveryResponse(StrictModel):
     """节点聚合步骤的结构化响应，包含节点和来源归属关系。"""
+
     nodes: list[WikiSourceNodeDiscoveryItem]
     unassigned_source_ids: list[str] = Field(default_factory=list)
 
 
 class SourceRef(StrictModel):
     """节点写正文时可使用的来源，可能是原始文档，也可能是子 Wiki 节点。"""
+
     ref_id: NonEmptyStr
     ref_type: Literal["document", "wiki_node"] = "document"
     doc_id: NonEmptyStr
@@ -147,12 +185,14 @@ class SourceRef(StrictModel):
 
 class SourceAssignmentResult(StrictModel):
     """来源分配阶段的完整结果，按节点组织可引用来源并记录未分配来源。"""
+
     source_refs_by_node: dict[str, list[SourceRef]]
     unassigned_source_ids: list[str] = Field(default_factory=list)
 
 
 class SourceAssignmentItem(StrictModel):
     """模型返回的一条来源分配，把一个 Wiki 节点绑定到一组下层来源 ID。"""
+
     node_id: NodeId
     source_ids: NonEmptyStrList
     support_scope: NonEmptyStr
@@ -160,42 +200,43 @@ class SourceAssignmentItem(StrictModel):
 
 class SourceAssignmentResponse(StrictModel):
     """来源分配步骤的结构化响应，保留模型返回的节点到来源 ID 的绑定。"""
+
     assignments: list[SourceAssignmentItem]
     unassigned_source_ids: list[str] = Field(default_factory=list)
 
 
-class NodeDocumentContent(StrictModel):
-    """LLM 生成的节点正文内容，不包含代码侧确定的文档 ID。"""
-    title: NonEmptyStr = "High-Level Knowledge"
+class NodeMarkdownResponse(StrictModel):
+    """节点正文相关模型调用的唯一输出。"""
+
+    markdown: NonEmptyStr
+
+
+class NodeDocument(StrictModel):
+    """节点目录下唯一的 Markdown 正文。"""
+
+    title: NonEmptyStr
     content: NonEmptyStr
-
-
-class NodeDocument(NodeDocumentContent):
-    """节点目录下生成的 Markdown 文档内容，最终会写入 documents/*.md。"""
-    document_id: NonEmptyStr
-
-
-class NodeDocumentsResponse(StrictModel):
-    """节点正文生成步骤的结构化响应。"""
-    documents: list[NodeDocumentContent]
 
 
 class NextLayerDecisionResponse(StrictModel):
     """向上聚合决策步骤的结构化响应。"""
+
     continue_upward: bool
     reasons: list[str] = Field(default_factory=list)
 
 
 class GeneratedNodeContext(StrictModel):
     """单个节点生成完成后的内存上下文，汇总节点 card、正文文档和来源。"""
+
     node: WikiNode
     card: DocumentCard
-    documents: list[NodeDocument]
+    document: NodeDocument
     source_refs: list[SourceRef]
 
 
 class PipelineArtifacts(StrictModel):
     """Wiki pipeline 一次运行的内存产物集合，用于串联各阶段输出。"""
+
     cards: list[DocumentCard] = Field(default_factory=list)
     nodes: list[WikiNode] = Field(default_factory=list)
     source_refs_by_node: dict[str, list[SourceRef]] = Field(default_factory=dict)
