@@ -29,10 +29,36 @@ class FakeClient:
     def __init__(self):
         self.mkdirs: list[str] = []
         self.writes: dict[str, str] = {}
+        self.write_order: list[str] = []
+        self.removes: list[str] = []
 
     async def mkdir(self, uri: str, *_: Any, **__: Any) -> None:
         self.mkdirs.append(uri)
 
     async def write(self, uri: str, content: str, *_: Any, **__: Any) -> dict[str, Any]:
         self.writes[uri] = content
+        self.write_order.append(uri)
+        return {}
+
+    async def exists(self, uri: str, *_: Any, **__: Any) -> bool:
+        return uri in self.writes or uri in self.mkdirs or any(
+            path.startswith(uri) for path in self.writes
+        )
+
+    async def read_file(self, uri: str, *_: Any, **__: Any) -> str:
+        if uri not in self.writes:
+            raise FileNotFoundError(uri)
+        return self.writes[uri]
+
+    async def rm(self, uri: str, *, recursive: bool = False, **__: Any) -> dict[str, Any]:
+        self.removes.append(uri)
+        if recursive:
+            self.writes = {
+                path: content
+                for path, content in self.writes.items()
+                if not path.startswith(uri)
+            }
+            self.mkdirs = [path for path in self.mkdirs if not path.startswith(uri)]
+        else:
+            self.writes.pop(uri, None)
         return {}

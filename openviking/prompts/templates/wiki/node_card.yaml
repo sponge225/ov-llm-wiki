@@ -17,7 +17,7 @@ template: |
 
   The input contains:
   - node.title and node.scope. Use scope only as the boundary for interpreting the node documents.
-  - generated documents. Use only document content as the factual source for the card.
+  - one generated document. Use only its content as the factual source for the card.
 
   Return only the semantic card content: summary, main_points, important_terms, and candidate_topics.
   Do not return doc_id, resource_uri, title, markdown, node fields, source assignment fields, or scope.

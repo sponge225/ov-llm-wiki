@@ -87,12 +87,12 @@ class HierarchicalRetriever:
         if rerank_config and rerank_config.is_available():
             self._rerank_client = RerankClient.from_config(rerank_config)
             provider = rerank_config._effective_provider()
-            logger.info(
+            logger.debug(
                 f"[HierarchicalRetriever] Rerank enabled (provider={provider}), threshold={self.threshold}"
             )
         else:
             self._rerank_client = None
-            logger.info(
+            logger.debug(
                 f"[HierarchicalRetriever] Rerank not configured, using vector search only with threshold={self.threshold}"
             )
 

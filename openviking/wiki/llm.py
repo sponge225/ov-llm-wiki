@@ -10,6 +10,10 @@ from typing import Any
 from openviking.models.vlm.llm import StructuredVLM
 
 
+class WikiLLMOutputError(RuntimeError):
+    """The model call succeeded but did not return a usable JSON object."""
+
+
 @dataclass
 class LLMCallRecord:
     step: str
@@ -64,9 +68,9 @@ class WikiLLMRunner:
             schema_name=schema_name,
         )
         if result is None:
-            raise RuntimeError(f"LLM step {step} returned no parseable JSON")
+            raise WikiLLMOutputError(f"LLM step {step} returned no parseable JSON")
         if not isinstance(result, dict):
-            raise RuntimeError(f"LLM step {step} must return a JSON object")
+            raise WikiLLMOutputError(f"LLM step {step} must return a JSON object")
 
         self.log.raw_outputs.append(
             LLMOutputRecord(

@@ -33,6 +33,14 @@ def card_json_uri(config: WikiConfig, doc_id: str) -> str:
     return f"{cards_dir(config)}{doc_id}.card.json"
 
 
+def card_manifest_uri(config: WikiConfig) -> str:
+    return f"{cards_dir(config)}manifest.json"
+
+
+def card_run_dir(config: WikiConfig) -> str:
+    return f"{cards_dir(config)}run/"
+
+
 def nodes_dir(config: WikiConfig) -> str:
     return f"{wiki_root(config)}nodes/"
 
@@ -59,8 +67,8 @@ def node_documents_dir(config: WikiConfig, node_id: str) -> str:
     return f"{node_root_uri(config, node_id)}documents/"
 
 
-def node_document_uri(config: WikiConfig, node_id: str, document_id: str) -> str:
-    return f"{node_documents_dir(config, node_id)}{document_id}.md"
+def node_document_uri(config: WikiConfig, node_id: str) -> str:
+    return f"{node_documents_dir(config, node_id)}document.md"
 
 
 def node_sources_dir(config: WikiConfig, node_id: str) -> str:

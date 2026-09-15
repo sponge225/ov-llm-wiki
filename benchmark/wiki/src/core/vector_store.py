@@ -119,7 +119,7 @@ class VikingStoreWrapper:
             "resource_uris": resource_uris,
         }
 
-    def build_wiki(
+    def build_wiki_cards(
         self,
         resource_uris: list[str],
         card_input_mode: str = "summary",
@@ -132,13 +132,42 @@ class VikingStoreWrapper:
                 "status": "skipped",
                 "resource_uris": [],
             }
-        result = self.client.build_wiki(
+        result = self.client.build_wiki_cards(
             resource_uris=resource_uris,
             card_input_mode=card_input_mode,
             max_card_input_chars=max_card_input_chars,
         )
         result["time"] = time.time() - start_time
         return result
+
+    def build_wiki(self, resource_uris: list[str]) -> dict:
+        start_time = time.time()
+        if not resource_uris:
+            return {
+                "time": time.time() - start_time,
+                "status": "skipped",
+                "resource_uris": [],
+            }
+        result = self.client.build_wiki(resource_uris=resource_uris)
+        result["time"] = time.time() - start_time
+        return result
+
+    def list_resource_roots(self) -> list[str]:
+        entries = self.client.ls(
+            "viking://resources/",
+            recursive=False,
+            show_all_hidden=False,
+            node_limit=10000,
+        )
+        roots = []
+        for entry in entries or []:
+            if not isinstance(entry, dict):
+                continue
+            is_dir = entry.get("isDir", entry.get("type") == "directory")
+            uri = str(entry.get("uri") or "").rstrip("/")
+            if is_dir and uri.startswith("viking://resources/"):
+                roots.append(uri)
+        return list(dict.fromkeys(roots))
 
     def retrieve(self, query: str, topk: int, target_uri: str = "viking://resources"):
         """Execute retrieval"""
@@ -156,8 +185,8 @@ class VikingStoreWrapper:
         except Exception:
             pass
 
-    def clear_wiki(self) -> dict:
-        return self.client.clear_wiki()
+    def clear_wiki(self, preserve_cards: bool = False) -> dict:
+        return self.client.clear_wiki(preserve_cards=preserve_cards)
 
     def close(self):
         """Release the underlying OpenViking client if supported."""

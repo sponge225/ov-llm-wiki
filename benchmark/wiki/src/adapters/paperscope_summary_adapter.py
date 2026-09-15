@@ -82,21 +82,36 @@ def _link_or_copy(source: Path, destination: Path) -> None:
 
 
 class PaperScopeSummaryAdapter(BaseAdapter):
-    """Load one prepared PaperScope Summary prompt type.
+    """Load prepared PaperScope Summary QA files.
 
-    ``raw_file_path`` points to one of ``summary_trend.jsonl``,
-    ``summary_gap.jsonl`` or ``summary_results_comparison.jsonl``. The sibling
-    ``documents.jsonl`` controls whether 57 or 93 PDFs are staged for ingestion.
+    ``raw_file_path`` may point to one ``summary_*.jsonl`` file or to a
+    PaperScopeSummary dataset directory. The sibling ``documents.jsonl`` controls
+    whether 57 or 93 PDFs are staged for ingestion.
     """
 
-    def _qa_path(self) -> Path:
+    def _qa_paths(self) -> list[Path]:
         path = Path(self.raw_file_path)
-        if not path.is_file():
-            raise FileNotFoundError(f"PaperScope QA file not found: {path}")
-        return path
+        if path.is_file():
+            return [path]
+        if not path.is_dir():
+            raise FileNotFoundError(f"PaperScope QA path not found: {path}")
+
+        qa_paths = [
+            path / "summary_trend.jsonl",
+            path / "summary_gap.jsonl",
+            path / "summary_results_comparison.jsonl",
+        ]
+        missing = [str(qa_path) for qa_path in qa_paths if not qa_path.is_file()]
+        if missing:
+            raise FileNotFoundError(f"PaperScope QA file(s) not found: {missing}")
+        return qa_paths
+
+    def _dataset_dir(self) -> Path:
+        path = Path(self.raw_file_path)
+        return path if path.is_dir() else path.parent
 
     def _manifest_entries(self) -> list[dict[str, Any]]:
-        manifest = self._qa_path().parent / "documents.jsonl"
+        manifest = self._dataset_dir() / "documents.jsonl"
         if not manifest.is_file():
             raise FileNotFoundError(f"PaperScope document manifest not found: {manifest}")
         entries = _load_jsonl(manifest)
@@ -109,7 +124,7 @@ class PaperScopeSummaryAdapter(BaseAdapter):
 
     def data_prepare(self, doc_dir: str) -> List[StandardDoc]:
         entries = self._manifest_entries()
-        source_pdf_dir = self._qa_path().parent / "pdfs"
+        source_pdf_dir = self._dataset_dir() / "pdfs"
         destination_dir = Path(doc_dir)
         destination_dir.mkdir(parents=True, exist_ok=True)
 
@@ -139,43 +154,46 @@ class PaperScopeSummaryAdapter(BaseAdapter):
         return documents
 
     def load_and_transform(self) -> List[StandardSample]:
-        records = _load_jsonl(self._qa_path())
         grouped: "OrderedDict[tuple[str, ...], list[StandardQA]]" = OrderedDict()
 
-        for row_index, record in enumerate(records):
-            if not _is_valid_record(record):
-                continue
-            prompt_type = str(record.get("prompt_type") or "").strip()
-            if prompt_type not in PROMPT_TYPES:
-                raise ValueError(
-                    f"Unsupported PaperScope prompt_type at row {row_index}: {prompt_type}"
-                )
-            question = str(record.get("question") or "").strip()
-            answer = str(record.get("answer") or "").strip()
-            links = record.get("pdf_links")
-            if not question or not answer or not isinstance(links, list) or not links:
-                raise ValueError(f"Incomplete PaperScope QA record at row {row_index}")
-            paper_ids = tuple(sorted(_paper_id(link) for link in links))
-            if len(paper_ids) != int(record.get("num_papers", len(paper_ids))):
-                raise ValueError(f"num_papers mismatch at PaperScope row {row_index}")
+        for qa_path in self._qa_paths():
+            records = _load_jsonl(qa_path)
+            for row_index, record in enumerate(records):
+                if not _is_valid_record(record):
+                    continue
+                prompt_type = str(record.get("prompt_type") or "").strip()
+                if prompt_type not in PROMPT_TYPES:
+                    raise ValueError(
+                        f"Unsupported PaperScope prompt_type at {qa_path}:{row_index}: "
+                        f"{prompt_type}"
+                    )
+                question = str(record.get("question") or "").strip()
+                answer = str(record.get("answer") or "").strip()
+                links = record.get("pdf_links")
+                if not question or not answer or not isinstance(links, list) or not links:
+                    raise ValueError(f"Incomplete PaperScope QA record at {qa_path}:{row_index}")
+                paper_ids = tuple(sorted(_paper_id(link) for link in links))
+                if len(paper_ids) != int(record.get("num_papers", len(paper_ids))):
+                    raise ValueError(f"num_papers mismatch at {qa_path}:{row_index}")
 
-            qa = StandardQA(
-                question=question,
-                gold_answers=[answer],
-                evidence=[],
-                category=prompt_type,
-                metadata={
-                    "source_row_index": row_index,
-                    "prompt_type": prompt_type,
-                    "session": record.get("session"),
-                    "num_papers": record.get("num_papers"),
-                    "common_entities": record.get("common_entities", []),
-                    "pdf_links": links,
-                    "paper_ids": list(paper_ids),
-                    "original_question": record.get("original_question", ""),
-                },
-            )
-            grouped.setdefault(paper_ids, []).append(qa)
+                qa = StandardQA(
+                    question=question,
+                    gold_answers=[answer],
+                    evidence=[],
+                    category=prompt_type,
+                    metadata={
+                        "source_file": qa_path.name,
+                        "source_row_index": row_index,
+                        "prompt_type": prompt_type,
+                        "session": record.get("session"),
+                        "num_papers": record.get("num_papers"),
+                        "common_entities": record.get("common_entities", []),
+                        "pdf_links": links,
+                        "paper_ids": list(paper_ids),
+                        "original_question": record.get("original_question", ""),
+                    },
+                )
+                grouped.setdefault(paper_ids, []).append(qa)
 
         samples: list[StandardSample] = []
         for paper_ids, qa_pairs in grouped.items():

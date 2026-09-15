@@ -70,6 +70,17 @@ class BenchmarkPipeline:
             "completion_tokens",
         )
 
+    @staticmethod
+    def _llm_call_count(token_usage):
+        total_usage = token_usage.get("total_usage") or {}
+        call_count = int(total_usage.get("call_count", 0) or 0)
+        if call_count:
+            return call_count
+        return sum(
+            int((model_usage.get("total_usage") or {}).get("call_count", 0) or 0)
+            for model_usage in (token_usage.get("usage_by_model") or {}).values()
+        )
+
     def run_import(self):
         """Stage: Import documents into the OpenViking store."""
         self.logger.info(">>> Stage: Import")
@@ -112,31 +123,68 @@ class BenchmarkPipeline:
             }
         })
 
-    def run_build_wiki(self):
-        """Stage: Build Wiki from resources imported by the import step."""
-        self.logger.info(">>> Stage: Build Wiki")
+    def run_build_cards(self):
+        """Stage: Build reusable Document Cards from imported resources."""
+        self.logger.info(">>> Stage: Build Document Cards")
         if not self.db:
-            raise RuntimeError("Cannot build Wiki without a vector store")
+            raise RuntimeError("Cannot build Document Cards without a vector store")
 
         resource_uris = self._read_resource_manifest()
         wiki_card_input_mode = self.config['execution'].get('wiki_card_input_mode', 'summary')
         wiki_max_card_input_chars = int(
             self.config['execution'].get('wiki_max_card_input_chars', 20000)
         )
-        self.logger.info(f"Building Wiki for {len(resource_uris)} resource roots")
-        wiki_stats = self.db.build_wiki(
+        self.logger.info(f"Building Document Cards for {len(resource_uris)} resource roots")
+        card_stats = self.db.build_wiki_cards(
             resource_uris=resource_uris,
             card_input_mode=wiki_card_input_mode,
             max_card_input_chars=wiki_max_card_input_chars,
         )
+        token_usage = card_stats.get("token_usage") or {}
+        total_usage = token_usage.get("total_usage") or {}
+        call_count = self._llm_call_count(token_usage)
+        self.metrics_summary["document_card_generation"] = {
+            "time": card_stats["time"],
+            "input_tokens": total_usage.get("prompt_tokens", 0),
+            "output_tokens": total_usage.get("completion_tokens", 0),
+            "total_tokens": total_usage.get("total_tokens", 0),
+            "call_count": call_count,
+        }
+        self.logger.info(f"Document Card build finished. Time: {card_stats['time']:.2f}s")
+        self._update_report({
+            "Document Card Generation": {
+                "Total Card Build Time (s)": card_stats["time"],
+                "Total Input Tokens": total_usage.get("prompt_tokens", 0),
+                "Total Output Tokens": total_usage.get("completion_tokens", 0),
+                "Total Tokens": total_usage.get("total_tokens", 0),
+                "LLM Call Count": call_count,
+                "Cards": card_stats.get("cards", 0),
+                "Manifest URI": card_stats.get("card_manifest_uri"),
+                "Resource Roots": resource_uris,
+                "Status": card_stats.get("status"),
+                "Token Usage": token_usage,
+            }
+        })
+        return card_stats
+
+    def run_build_wiki(self):
+        """Stage: Build Wiki nodes from reusable Document Cards."""
+        self.logger.info(">>> Stage: Build Wiki")
+        if not self.db:
+            raise RuntimeError("Cannot build Wiki without a vector store")
+
+        resource_uris = self._read_resource_manifest()
+        self.logger.info(f"Building Wiki for {len(resource_uris)} resource roots")
+        wiki_stats = self.db.build_wiki(resource_uris=resource_uris)
         token_usage = wiki_stats.get("token_usage") or {}
         total_usage = token_usage.get("total_usage") or {}
+        call_count = self._llm_call_count(token_usage)
         self.metrics_summary["wiki_generation"] = {
             "time": wiki_stats["time"],
             "input_tokens": total_usage.get("prompt_tokens", 0),
             "output_tokens": total_usage.get("completion_tokens", 0),
             "total_tokens": total_usage.get("total_tokens", 0),
-            "call_count": total_usage.get("call_count", 0),
+            "call_count": call_count,
         }
         self.logger.info(f"Wiki build finished. Time: {wiki_stats['time']:.2f}s")
         self._update_report({
@@ -145,10 +193,11 @@ class BenchmarkPipeline:
                 "Total Input Tokens": total_usage.get("prompt_tokens", 0),
                 "Total Output Tokens": total_usage.get("completion_tokens", 0),
                 "Total Tokens": total_usage.get("total_tokens", 0),
-                "LLM Call Count": total_usage.get("call_count", 0),
+                "LLM Call Count": call_count,
+                "Cards Reused": wiki_stats.get("cards_reused", False),
+                "Card Manifest URI": wiki_stats.get("card_manifest_uri"),
                 "Resource Roots": resource_uris,
                 "Status": wiki_stats.get("status"),
-                "Cards": wiki_stats.get("cards", 0),
                 "Nodes": wiki_stats.get("nodes", 0),
                 "Node Contexts": wiki_stats.get("node_contexts", 0),
                 "Token Usage": token_usage,
@@ -327,13 +376,13 @@ class BenchmarkPipeline:
             }
         })
 
-    def run_clear_wiki(self):
+    def run_clear_wiki(self, preserve_cards: bool = False):
         """Stage: Clear generated Wiki assets only."""
         self.logger.info(">>> Stage: Clear Wiki")
         if not self.db:
             raise RuntimeError("Cannot clear Wiki without a vector store")
         start_time = time.time()
-        result = self.db.clear_wiki()
+        result = self.db.clear_wiki(preserve_cards=preserve_cards)
         duration = time.time() - start_time
         self.logger.info(f"Wiki cleanup finished. Time: {duration:.2f}s")
 
@@ -344,6 +393,8 @@ class BenchmarkPipeline:
                 "Wiki Root URI": result.get("wiki_root_uri"),
                 "Cleared": result.get("cleared"),
                 "Missing": result.get("missing"),
+                "Cards Preserved": result.get("cards_preserved", False),
+                "Removed Paths": result.get("removed_paths", []),
             }
         })
         return result
@@ -615,21 +666,76 @@ class BenchmarkPipeline:
 
     def _write_resource_manifest(self, resource_uris):
         data = {"resource_uris": list(resource_uris or [])}
-        with open(self.resource_manifest_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        self._write_resource_manifest_file(self.resource_manifest_file, data)
         self.logger.info(f"Imported resource manifest -> {self.resource_manifest_file}")
+        sidecar = self._resource_manifest_sidecar()
+        if sidecar:
+            self._write_resource_manifest_file(sidecar, data)
+            self.logger.info(f"Vector store resource manifest -> {sidecar}")
 
     def _read_resource_manifest(self):
-        if not os.path.exists(self.resource_manifest_file):
-            raise FileNotFoundError(
-                f"Imported resource manifest not found: {self.resource_manifest_file}. "
-                "Run --step import first."
+        candidates = [
+            self.resource_manifest_file,
+            self._resource_manifest_sidecar(),
+        ]
+        for manifest_file in candidates:
+            if not manifest_file or not os.path.exists(manifest_file):
+                continue
+            with open(manifest_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            resource_uris = list(data.get("resource_uris") or [])
+            if not resource_uris:
+                continue
+            if manifest_file != self.resource_manifest_file:
+                self._write_resource_manifest(resource_uris)
+                self.logger.info(f"Recovered imported resources from {manifest_file}")
+            return resource_uris
+
+        resource_uris = self._discover_resource_roots()
+        if resource_uris:
+            self._write_resource_manifest(resource_uris)
+            self.logger.info(
+                f"Recovered {len(resource_uris)} imported resource root(s) from vector store"
             )
-        with open(self.resource_manifest_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        resource_uris = data.get("resource_uris", [])
+            return resource_uris
+
+        raise FileNotFoundError(
+            f"Imported resource manifest not found: {self.resource_manifest_file}, "
+            "and no resource roots were found in the vector store. Run --step import first."
+        )
+
+    def _resource_manifest_sidecar(self):
+        vector_store = self.config.get("paths", {}).get("vector_store")
+        return f"{vector_store}.imported_resources.json" if vector_store else None
+
+    @staticmethod
+    def _write_resource_manifest_file(path, data):
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+
+    def _discover_resource_roots(self):
+        discover = getattr(self.db, "list_resource_roots", None)
+        if not callable(discover):
+            return []
+        resource_uris = list(discover() or [])
         if not resource_uris:
-            raise RuntimeError(
-                f"Imported resource manifest contains no resource roots: {self.resource_manifest_file}"
-            )
-        return resource_uris
+            return []
+
+        ingest_mode = self.config.get("execution", {}).get("ingest_mode", "per_file")
+        if ingest_mode != "directory":
+            return resource_uris
+
+        doc_output_dir = self.config.get("paths", {}).get("doc_output_dir")
+        expected_name = os.path.basename(os.path.normpath(doc_output_dir)) if doc_output_dir else ""
+        expected_uri = f"viking://resources/{expected_name}" if expected_name else ""
+        if expected_uri in resource_uris:
+            return [expected_uri]
+        if len(resource_uris) == 1:
+            return resource_uris
+        raise RuntimeError(
+            "Multiple resource roots exist in the vector store and none matches "
+            f"the configured doc_output_dir: {resource_uris}"
+        )

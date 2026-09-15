@@ -4,6 +4,7 @@ from openviking_sdk.errors import (
     AbortedError,
     ConflictError,
     OpenVikingError,
+    ProcessingError,
     ResourceExhaustedError,
     UnimplementedError,
 )
@@ -41,3 +42,15 @@ def test_client_preserves_unknown_error_code():
 
     assert exc_info.value.code == "PROVIDER_SPECIFIC"
     assert exc_info.value.details == {"x": 1}
+
+
+def test_client_preserves_processing_error_details():
+    client = AsyncHTTPClient(url="http://127.0.0.1:1933")
+    details = {"node_id": "topic", "source_id": "paper_1"}
+
+    with pytest.raises(ProcessingError) as exc_info:
+        client._raise_exception(
+            {"code": "PROCESSING_ERROR", "message": "retrieval failed", "details": details}
+        )
+
+    assert exc_info.value.details == details

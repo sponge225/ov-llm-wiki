@@ -33,11 +33,20 @@ def build_document_card_prompt(doc: ResourceDocument) -> str:
 def build_node_discovery_prompt(
     cards: list[DocumentCard],
     min_sources_per_node: int,
+    source_ids: list[str] | None = None,
 ) -> str:
+    if source_ids is not None and len(source_ids) != len(cards):
+        raise ValueError("source_ids must have the same length as cards")
     inputs = {
         "source_unit_count": len(cards),
         "min_sources_per_node": min_sources_per_node,
-        "source_records": [_source_card_payload(card) for card in cards],
+        "source_records": [
+            _source_card_payload(
+                card,
+                source_id=source_ids[index] if source_ids is not None else card.doc_id,
+            )
+            for index, card in enumerate(cards)
+        ],
     }
     return _render_wiki_prompt(
         "wiki.node_discovery",
@@ -46,13 +55,10 @@ def build_node_discovery_prompt(
     )
 
 
-def build_node_card_prompt(node: WikiNode, documents: list[NodeDocument]) -> str:
+def build_node_card_prompt(node: WikiNode, document: NodeDocument) -> str:
     inputs = {
         "node": node.model_dump(include={"title", "scope"}, mode="json"),
-        "documents": [
-            document.model_dump(include={"title", "content"}, mode="json")
-            for document in documents
-        ],
+        "document": document.model_dump(include={"title", "content"}, mode="json"),
     }
     return _render_wiki_prompt("wiki.node_card", inputs)
 
@@ -60,12 +66,57 @@ def build_node_card_prompt(node: WikiNode, documents: list[NodeDocument]) -> str
 def build_node_documents_prompt(
     node: WikiNode,
     source_documents: list[dict],
+    *,
+    max_document_tokens: int = 16000,
 ) -> str:
     inputs = {
         "node": node.model_dump(include={"title", "scope"}, mode="json"),
-        "source_documents": source_documents,
+        "source_documents": [
+            _source_document_payload(source_document, index=index)
+            for index, source_document in enumerate(source_documents, start=1)
+        ],
     }
-    return _render_wiki_prompt("wiki.node_documents", inputs)
+    return _render_wiki_prompt(
+        "wiki.node_documents", inputs, max_document_tokens=max_document_tokens
+    )
+
+
+def build_node_document_outline_prompt(node: WikiNode, source_cards: list[DocumentCard]) -> str:
+    inputs = {
+        "node": node.model_dump(include={"title", "scope"}, mode="json"),
+        "source_cards": [
+            card.model_dump(
+                include={"title", "summary", "main_points", "candidate_topics"},
+                mode="json",
+            )
+            for card in source_cards
+        ],
+    }
+    return _render_wiki_prompt("wiki.node_document_outline", inputs)
+
+
+def build_node_document_refine_prompt(
+    node: WikiNode,
+    current_markdown: str,
+    source_documents: list[dict],
+    *,
+    initial: bool,
+    max_document_tokens: int = 16000,
+) -> str:
+    inputs = {
+        "node": node.model_dump(include={"title", "scope"}, mode="json"),
+        "current_markdown": current_markdown,
+        "new_source_documents": [
+            _source_document_payload(source_document, index=index)
+            for index, source_document in enumerate(source_documents, start=1)
+        ],
+    }
+    return _render_wiki_prompt(
+        "wiki.node_document_refine",
+        inputs,
+        phase="initial" if initial else "refine",
+        max_document_tokens=max_document_tokens,
+    )
 
 
 def build_next_layer_decision_prompt(
@@ -84,19 +135,36 @@ def build_next_layer_decision_prompt(
 
 def _child_node_payload(context: GeneratedNodeContext) -> dict:
     return {
-        "node": context.node.model_dump(mode="json"),
+        "node": context.node.model_dump(include={"title", "scope"}, mode="json"),
         "card": context.card.model_dump(
             include={"summary", "main_points", "important_terms", "candidate_topics"},
             mode="json",
         ),
-        "documents": [document.model_dump(mode="json") for document in context.documents],
-        "source_refs": [ref.model_dump(mode="json") for ref in context.source_refs],
+        "document": context.document.model_dump(include={"title", "content"}, mode="json"),
+        "source_count": len(context.source_refs),
     }
 
 
-def _source_card_payload(card: DocumentCard) -> dict:
+def _source_document_payload(
+    source_document: dict,
+    *,
+    index: int,
+) -> dict:
+    sections = [
+        {"content": str(section.get("content") or "")}
+        for section in source_document.get("sections", [])
+        if str(section.get("content") or "")
+    ]
     return {
-        "source_id": card.doc_id,
+        "source_id": f"S{index:04d}",
+        "title": str(source_document.get("title") or ""),
+        "sections": sections,
+    }
+
+
+def _source_card_payload(card: DocumentCard, *, source_id: str) -> dict:
+    return {
+        "source_id": source_id,
         "title": card.title,
         "summary": card.summary,
         "candidate_topics": card.candidate_topics,

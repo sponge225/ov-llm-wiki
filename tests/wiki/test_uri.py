@@ -2,6 +2,7 @@ from openviking.wiki.config import WikiConfig
 from openviking.wiki.uri import (
     node_card_json_uri,
     node_card_md_uri,
+    node_document_uri,
     node_root_uri,
     sanitize_node_id,
     wiki_root,
@@ -23,6 +24,9 @@ def test_node_card_uris_live_under_node_root():
     )
     assert node_card_json_uri(config, "question_answering") == (
         "viking://wiki/nodes/question_answering/card.json"
+    )
+    assert node_document_uri(config, "question_answering") == (
+        "viking://wiki/nodes/question_answering/documents/document.md"
     )
 
 

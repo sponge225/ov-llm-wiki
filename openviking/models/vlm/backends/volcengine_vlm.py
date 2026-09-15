@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from openviking.telemetry import tracer
+from openviking.utils.model_retry import is_retryable_api_error
 from openviking_cli.utils import get_logger
 
 from ..base import ToolCall, VLMResponse
@@ -205,8 +206,11 @@ class VolcEngineVLM(OpenAIVLM):
                 return content
             except Exception as e:
                 last_error = e
-                if attempt < self.max_retries:
-                    await asyncio.sleep(2**attempt)
+                retryable = is_retryable_api_error(e)
+                retry_delay = min(2**attempt, 8.0)
+                if not retryable or attempt >= self.max_retries:
+                    raise
+                await asyncio.sleep(retry_delay)
 
         if last_error:
             raise last_error

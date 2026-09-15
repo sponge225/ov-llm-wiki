@@ -51,7 +51,7 @@ async def test_node_card_uses_wiki_node_uri_and_node_card_step():
             depth=1,
             scope="QA methods and evaluation.",
         ),
-        [NodeDocument(document_id="0001", content="# QA\n\nSynthesized QA knowledge.")],
+        NodeDocument(title="Question Answering", content="# QA\n\nSynthesized QA knowledge."),
         resource_uri="viking://wiki/nodes/question_answering/",
     )
 

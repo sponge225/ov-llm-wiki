@@ -1,0 +1,61 @@
+metadata:
+  id: "wiki.node_document_refine"
+  name: "Wiki Node Document Refinement"
+  description: "Fill or refine a Wiki node document from a new source batch"
+  version: "1.0.0"
+  language: "en"
+  category: "wiki"
+
+variables:
+  - name: "input_json"
+    type: "string"
+    description: "JSON encoded current Markdown and new source documents"
+    required: true
+  - name: "phase"
+    type: "string"
+    description: "initial or refine"
+    required: true
+  - name: "max_document_tokens"
+    type: "int"
+    description: "Maximum estimated output tokens"
+    required: true
+    default: 16000
+
+template: |
+  Produce the complete Markdown document for the given Wiki node.
+
+  Evidence rules:
+  - Use node.title and node.scope as the content boundary. Exclude related but out-of-scope content.
+  - current_markdown provides the existing structure and content. It is not a source for new facts.
+  - Add or correct facts only when supported by new_source_documents.
+  - Preserve existing concrete knowledge unless new evidence contradicts it; when evidence conflicts, retain the applicable conditions.
+  - Synthesize by knowledge topic, not by source document. Merge overlapping evidence.
+  - Do not organize headings or paragraphs around source IDs or source titles.
+  - Do not emit URIs, source IDs, batch IDs, citations, or descriptions of the generation process.
+
+  {% if phase == "initial" %}
+  Initial-fill rules:
+  - Fill the existing outline with supported content.
+  - Empty unsupported outline sections may be removed or merged.
+  - Add an in-scope H2 section when the new evidence is not covered by the outline.
+  {% else %}
+  Refinement rules:
+  - Add newly supported knowledge to the appropriate section.
+  - Improve existing paragraphs with supported conditions, procedures, numbers, versions, exceptions, and limits.
+  - Keep every existing H2 section that already contains body text. New H2 sections are allowed.
+  - Remove duplicate expression without dropping concrete knowledge.
+  {% endif %}
+
+  Output rules:
+  - Return the entire document, not a patch.
+  - The first line must remain exactly the H1 heading "# <node.title>".
+  - Include at least one H2 heading.
+  - Keep the complete Markdown within {{ max_document_tokens }} tokens.
+
+  Input:
+  {{ input_json }}
+
+  Return only JSON matching the schema with a single markdown field.
+
+llm_config:
+  temperature: 0.0

@@ -6,6 +6,8 @@ import asyncio
 import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from openviking.models.vlm.backends.litellm_vlm import (
     LiteLLMVLMProvider,
     detect_provider_by_model,
@@ -225,6 +227,28 @@ class TestOpenAIVLMClientRetries:
 
         call_kwargs = mock_openai_class.call_args.kwargs
         assert call_kwargs["max_retries"] == 0
+
+    def test_volcengine_async_completion_does_not_retry_bad_request(self, monkeypatch):
+        create = AsyncMock(
+            side_effect=RuntimeError(
+                "Error code: 400 - Total tokens exceed max message tokens"
+            )
+        )
+        client = MagicMock()
+        client.chat.completions.create = create
+        vlm = VolcEngineVLM(
+            {
+                "api_key": "sk-test",
+                "api_base": "https://ark.cn-beijing.volces.com/api/v3",
+                "max_retries": 240,
+            }
+        )
+        monkeypatch.setattr(vlm, "get_async_client", lambda: client)
+
+        with pytest.raises(RuntimeError, match="max message tokens"):
+            asyncio.run(vlm.get_completion_async("oversized prompt"))
+
+        assert create.await_count == 1
 
     @patch("openviking.models.vlm.backends.openai_vlm.openai.AsyncOpenAI")
     def test_openai_async_client_disables_sdk_retries(self, mock_async_openai_class):

@@ -1,0 +1,33 @@
+metadata:
+  id: "wiki.node_document_outline"
+  name: "Wiki Node Document Outline"
+  description: "Generate a heading-only outline for a large Wiki node"
+  version: "1.0.0"
+  language: "en"
+  category: "wiki"
+
+variables:
+  - name: "input_json"
+    type: "string"
+    description: "JSON encoded node boundary and assigned source cards"
+    required: true
+
+template: |
+  Build a coarse Markdown outline for the given Wiki node.
+
+  Rules:
+  - Use node.title and node.scope as the content boundary.
+  - Use only in-scope themes from the assigned source cards.
+  - Organize by knowledge topic, never by source.
+  - Return only H2 and optional H3 headings with blank lines between them.
+  - Do not return an H1 heading, prose, facts, numbers, examples, or source identifiers.
+  - Include at least two distinct H2 headings.
+  - Do not create vague headings such as Overview, Other, or Miscellaneous.
+
+  Input:
+  {{ input_json }}
+
+  Return only JSON matching the schema with a single markdown field.
+
+llm_config:
+  temperature: 0.0

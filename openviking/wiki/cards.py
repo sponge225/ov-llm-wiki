@@ -47,10 +47,7 @@ class DocumentCardGenerator:
                 cards[index] = await self._generate_card(doc)
                 async with progress_lock:
                     completed += 1
-                    should_log_progress = (
-                        completed == total
-                        or completed % progress_log_every == 0
-                    )
+                    should_log_progress = completed == total or completed % progress_log_every == 0
                     if should_log_progress:
                         elapsed = time.monotonic() - started_at
                         logger.info(
@@ -83,11 +80,11 @@ class DocumentCardGenerator:
     async def generate_node_card(
         self,
         node: WikiNode,
-        documents: list[NodeDocument],
+        document: NodeDocument,
         *,
         resource_uri: str,
     ) -> DocumentCard:
-        prompt = build_node_card_prompt(node, documents)
+        prompt = build_node_card_prompt(node, document)
         return await self._generate_card_from_prompt(
             prompt=prompt,
             step="node_card",

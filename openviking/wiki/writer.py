@@ -35,9 +35,21 @@ class WikiVikingFSWriter:
 
     async def ensure_dirs(self, node_ids: list[str] | None = None) -> None:
         """创建必要的目录"""
+        await self.ensure_card_dirs()
+        await self.ensure_wiki_dirs(node_ids)
+
+    async def ensure_card_dirs(self) -> None:
         dirs = [
             wiki_uri.wiki_root(self.config),
             wiki_uri.cards_dir(self.config),
+            wiki_uri.card_run_dir(self.config),
+        ]
+        for directory in dirs:
+            await self.viking_fs.mkdir(directory, exist_ok=True, ctx=self.ctx)
+
+    async def ensure_wiki_dirs(self, node_ids: list[str] | None = None) -> None:
+        dirs = [
+            wiki_uri.wiki_root(self.config),
             wiki_uri.nodes_dir(self.config),
             wiki_uri.run_dir(self.config),
         ]

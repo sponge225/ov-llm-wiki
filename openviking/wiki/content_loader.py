@@ -13,6 +13,24 @@ if TYPE_CHECKING:
     from openviking.storage.viking_fs import VikingFS
 
 LS_ALL_NODES = 2**31 - 1
+IMAGE_EXTENSIONS = {
+    ".bmp",
+    ".dib",
+    ".gif",
+    ".heic",
+    ".heif",
+    ".icns",
+    ".ico",
+    ".jpeg",
+    ".jpg",
+    ".jp2",
+    ".png",
+    ".sgi",
+    ".svg",
+    ".tif",
+    ".tiff",
+    ".webp",
+}
 
 
 class WikiCardInputMode(str, Enum):
@@ -52,7 +70,9 @@ class WikiContentLoader:
                     "rerun after semantic generation succeeds or use raw_chunk mode"
                 )
         content = self._render_entries(entries, max_chars=max_card_input_chars)
-        source_sections = self._source_sections_from_entries(entries, max_chars=max_card_input_chars)
+        source_sections = self._source_sections_from_entries(
+            entries, max_chars=max_card_input_chars
+        )
         return ResourceDocument(
             doc_id=doc.doc_id,
             resource_uri=doc.resource_uri,
@@ -64,6 +84,24 @@ class WikiContentLoader:
                 "card_input_mode": input_mode.value,
                 "missing_summary_uris": missing,
             },
+        )
+
+    async def load_source_document(self, doc: WikiResourceInput) -> ResourceDocument:
+        """Load every textual raw chunk used by node document generation."""
+        root_uri = doc.document_dir_uri or doc.resource_uri
+        entries = await self._collect_entries(root_uri, mode=WikiCardInputMode.RAW_CHUNK)
+        source_sections = [
+            SourceSection(section_uri=uri, content=text)
+            for entry in entries
+            if (uri := str(entry.get("uri") or "").strip())
+            and (text := str(entry.get("text") or "").strip())
+        ]
+        return ResourceDocument(
+            doc_id=doc.doc_id,
+            resource_uri=doc.resource_uri,
+            title=doc.title,
+            source_sections=source_sections,
+            metadata=doc.metadata,
         )
 
     async def _collect_entries(
@@ -84,6 +122,8 @@ class WikiContentLoader:
                         continue
                     child_uri = str(child.get("uri") or f"{uri.rstrip('/')}/{name}")
                     if self._is_hidden_semantic_file(child_uri):
+                        continue
+                    if self._is_image_file(child_uri):
                         continue
                     if self._entry_is_dir(child):
                         await visit(child_uri, [*title_path, name])
@@ -115,12 +155,10 @@ class WikiContentLoader:
 
         total_chars = sum(len(text) for _, text in raw_sections)
         if total_chars <= max_chars:
-            return [
-                SourceSection(section_uri=uri, content=text)
-                for uri, text in raw_sections
-            ]
+            return [SourceSection(section_uri=uri, content=text) for uri, text in raw_sections]
 
-        per_section_budget = max(400, max_chars // max(1, len(raw_sections)))
+        raw_sections = self._sample_for_budget(raw_sections, max_chars=max_chars)
+        per_section_budget = max(1, max_chars // max(1, len(raw_sections)))
         return [
             SourceSection(section_uri=uri, content=self._clip(text, per_section_budget))
             for uri, text in raw_sections
@@ -135,13 +173,13 @@ class WikiContentLoader:
     ) -> None:
         if self._is_hidden_semantic_file(uri):
             return
+        if self._is_image_file(uri):
+            return
         if mode == WikiCardInputMode.RAW_CHUNK:
             text = await self._safe_read(uri)
             if not text:
                 return
-            entries.append(
-                {"kind": "leaf_raw", "uri": uri, "title_path": title_path, "text": text}
-            )
+            entries.append({"kind": "leaf_raw", "uri": uri, "title_path": title_path, "text": text})
             return
 
         text = await self._leaf_abstract(uri)
@@ -187,8 +225,25 @@ class WikiContentLoader:
             return joined
 
         # Preserve coverage over all entries instead of dropping tail entries.
-        per_entry_budget = max(400, (max_chars - len(rendered) * 2) // max(1, len(rendered)))
-        return "\n\n".join(self._clip(text, per_entry_budget) for text in rendered)
+        rendered = self._sample_for_budget(rendered, max_chars=max_chars)
+        separator_chars = max(0, len(rendered) - 1) * 2
+        per_entry_budget = max(
+            1,
+            (max_chars - separator_chars) // max(1, len(rendered)),
+        )
+        joined = "\n\n".join(self._clip(text, per_entry_budget) for text in rendered)
+        return self._clip(joined, max_chars)
+
+    @staticmethod
+    def _sample_for_budget(items: list[Any], *, max_chars: int) -> list[Any]:
+        max_items = max(1, max_chars // 400)
+        if len(items) <= max_items:
+            return items
+        if max_items == 1:
+            return [items[0]]
+        last_index = len(items) - 1
+        indices = [round(index * last_index / (max_items - 1)) for index in range(max_items)]
+        return [items[index] for index in dict.fromkeys(indices)]
 
     @staticmethod
     def _render_entry(entry: dict[str, Any]) -> str:
@@ -239,3 +294,8 @@ class WikiContentLoader:
     @staticmethod
     def _is_hidden_semantic_file(uri: str) -> bool:
         return uri.endswith("/.abstract.md") or uri.endswith("/.overview.md")
+
+    @staticmethod
+    def _is_image_file(uri: str) -> bool:
+        normalized = uri.lower().split("?", 1)[0].split("#", 1)[0]
+        return any(normalized.endswith(extension) for extension in IMAGE_EXTENSIONS)
