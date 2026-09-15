@@ -1,5 +1,5 @@
 project_name: "Wiki_Benchmark"
-dataset_name: "paperscope_summary_93_trend"
+dataset_name: "paperscope_summary_93"
 
 adapter:
   module: "src.adapters.paperscope_summary_adapter"
@@ -7,8 +7,8 @@ adapter:
 
 execution:
   mode: "vikingbot"
-  server_port: 2026
-  max_workers: 1
+  server_port: 20269
+  max_workers: 8
   retrieval_topk: 5
   max_queries: null
   skip_ingestion: false
@@ -19,7 +19,7 @@ execution:
   retrieval_instruction: ""
 
 paths:
-  dataset_path: "datasets/PaperScopeSummary93/summary_trend.jsonl"
+  dataset_path: "datasets/PaperScopeSummary93"
   doc_output_dir: "wiki_storage/paperscope_summary_93/paperscope_summary_93_processed_docs"
   vector_store: "wiki_storage/paperscope_summary_93/paperscope_summary_93_viking_store_index"
   output_dir: "Output/{dataset_name}/wiki"

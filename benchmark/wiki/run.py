@@ -115,8 +115,13 @@ def main():
     parser.add_argument("--config", default=default_config_path,
                         help=f"Path to config file. Default: {default_config_path}")
 
-    parser.add_argument("--step", choices=["all", "import", "build_wiki", "clear_wiki", "gen", "eval", "gen+eval", "del"], default="all",
-                        help="Execution step: 'import', 'build_wiki', 'clear_wiki', 'gen', 'eval', 'gen+eval', 'del', or 'all'")
+    parser.add_argument("--step", choices=["all", "import", "build_cards", "build_wiki", "clear_wiki", "gen", "eval", "gen+eval", "del"], default="all",
+                        help="Execution step: 'import', 'build_cards', 'build_wiki', 'clear_wiki', 'gen', 'eval', 'gen+eval', 'del', or 'all'")
+    parser.add_argument(
+        "--preserve-cards",
+        action="store_true",
+        help="With --step clear_wiki, preserve reusable Document Cards",
+    )
 
     parser.add_argument("--ov-conf", type=str, default=None,
                         help="Path to ov.conf file (default: benchmark/wiki/ov.conf)")
@@ -224,6 +229,7 @@ def main():
         needs_vector_store = (
             mode == BASELINE_MODE
             or will_import
+            or args.step == "build_cards"
             or args.step == "build_wiki"
             or args.step == "clear_wiki"
             or (args.step == "all" and build_wiki_enabled)
@@ -266,6 +272,8 @@ def main():
                 pipeline.run_import()
 
             if args.step == "all" and build_wiki_enabled:
+                logger.info("Stage: Build Document Cards")
+                pipeline.run_build_cards()
                 logger.info("Stage: Build Wiki")
                 pipeline.run_build_wiki()
 
@@ -273,13 +281,17 @@ def main():
                 pipeline.db.close()
                 pipeline.db = VikingStoreWrapper(store_path=config['paths']['vector_store'])
 
+        if args.step == "build_cards":
+            logger.info("Stage: Build Document Cards")
+            pipeline.run_build_cards()
+
         if args.step == "build_wiki":
             logger.info("Stage: Build Wiki")
             pipeline.run_build_wiki()
 
         if args.step == "clear_wiki":
             logger.info("Stage: Clear Wiki")
-            pipeline.run_clear_wiki()
+            pipeline.run_clear_wiki(preserve_cards=args.preserve_cards)
 
         if args.step in ["all", "gen", "gen+eval"]:
             if mode == VIKINGBOT_MODE and pipeline.db is not None:
