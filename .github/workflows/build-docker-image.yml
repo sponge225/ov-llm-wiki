@@ -199,14 +199,14 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Download GHCR image digests
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v7
         with:
           pattern: docker-digests-ghcr-*
           path: /tmp/digests-ghcr
           merge-multiple: true
 
       - name: Download Docker Hub image digests
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v7
         with:
           pattern: docker-digests-dockerhub-*
           path: /tmp/digests-dockerhub
