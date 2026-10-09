@@ -84,7 +84,7 @@ jobs:
         run: python -m build
 
       - name: Upload SDK distributions
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: python-sdk-distributions
           path: sdk/python/dist/*
