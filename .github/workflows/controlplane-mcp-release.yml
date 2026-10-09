@@ -89,7 +89,7 @@ jobs:
       id-token: write
     steps:
       - name: Download distributions
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v7
         with:
           name: controlplane-mcp-distributions
           path: dist/
@@ -113,7 +113,7 @@ jobs:
       id-token: write
     steps:
       - name: Download distributions
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v7
         with:
           name: controlplane-mcp-distributions
           path: dist/
