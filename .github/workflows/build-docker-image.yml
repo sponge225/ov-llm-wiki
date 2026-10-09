@@ -128,7 +128,7 @@ jobs:
           touch "/tmp/digests-ghcr/${ghcr_digest#sha256:}"
 
       - name: Upload GHCR image digest
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: docker-digests-ghcr-${{ matrix.arch }}
           path: /tmp/digests-ghcr/*
@@ -142,7 +142,7 @@ jobs:
           touch "/tmp/digests-dockerhub/${dockerhub_digest#sha256:}"
 
       - name: Upload Docker Hub image digest
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: docker-digests-dockerhub-${{ matrix.arch }}
           path: /tmp/digests-dockerhub/*
